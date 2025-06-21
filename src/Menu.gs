@@ -458,9 +458,6 @@ function showSystemSettings() {
           <button onclick="runFunction('showLogFilterDialog')" style="width: 100%; padding: 10px; margin-bottom: 10px; background-color: #9C27B0; color: white; border: none; border-radius: 4px; cursor: pointer;">
             ログフィルタ表示
           </button>
-          <button onclick="runFunction('showEnhancedLogsQuick')" style="width: 100%; padding: 10px; margin-bottom: 10px; background-color: #673AB7; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            拡張ログ表示（最新50件）
-          </button>
         </div>
         <div>
           <button onclick="google.script.host.close()" style="width: 100%; padding: 10px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
@@ -515,85 +512,59 @@ function clearAllCache() {
 }
 
 /**
- * システムログの表示
+ * システムログの表示（拡張HTML形式）
  */
 function showSystemLogs() {
   try {
-    // 従来のLogger.log()で記録されたログを取得
-    const legacyLogs = Logger.getLog();
+    logSystemActivityEnhanced('showSystemLogs', 'システムログ表示開始', 'INFO', 'システム');
     
-    // 最新の実行履歴からログ情報を構築
-    const executionLogs = getRecentExecutionLogs();
+    // PropertiesServiceからログデータを取得
+    const properties = PropertiesService.getScriptProperties();
+    const storedLogs = properties.getProperty('systemExecutionLogs');
     
-    // 両方のログを結合
-    let combinedLogs = '';
-    
-    if (executionLogs && executionLogs.trim()) {
-      combinedLogs += '【最新実行ログ】\n';
-      combinedLogs += executionLogs;
-      combinedLogs += '\n\n';
-    }
-    
-    if (legacyLogs && legacyLogs.trim()) {
-      combinedLogs += '【詳細ログ（Logger.log）】\n';
-      combinedLogs += legacyLogs.split('\n').slice(-50).join('\n'); // 最新50件
-    }
-    
-    const ui = SpreadsheetApp.getUi();
-    
-    if (!combinedLogs.trim()) {
-      ui.alert(
-        'システムログ',
-        'ログエントリがありません。\n\n※ログが表示されない場合は、\n1. 何らかの処理を実行してから再度確認してください\n2. GASの実行履歴で詳細ログを確認できます',
-        ui.ButtonSet.OK
+    if (!storedLogs) {
+      SpreadsheetApp.getUi().alert(
+        'システムログ', 
+        'ログエントリがありません。\n\n※ログが表示されない場合は、\n1. 何らかの処理を実行してから再度確認してください\n2. GASの実行履歴で詳細ログを確認できます', 
+        SpreadsheetApp.getUi().ButtonSet.OK
       );
-    } else {
-      // 長すぎる場合は最新部分のみ表示
-      if (combinedLogs.length > 8000) {
-        combinedLogs = '...(ログが長いため最新部分のみ表示)\n\n' + combinedLogs.slice(-8000);
-      }
+      return 'ログエントリがありませんでした。';
+    }
+    
+    let logs = JSON.parse(storedLogs);
+    
+    // 最新50件のログを取得
+    const filteredLogs = logs.slice(-50);
+    
+    // デフォルトフィルタ設定（全レベル・全カテゴリ）
+    const defaultFilters = {
+      levels: ['INFO', 'WARNING', 'ERROR'],
+      categories: ['CSV取込', 'データ検証', 'ファイル生成', '自動補完', 'マスタ管理', 'システム'],
+      displayCount: 50,
+      keyword: '',
+      displayMode: 'enhanced'
+    };
+    
+    // HTML形式でログを表示
+    const htmlContent = createLogHtmlContent(filteredLogs, defaultFilters);
+    const htmlOutput = HtmlService.createHtmlOutput(htmlContent)
+      .setWidth(900)
+      .setHeight(600)
+      .setTitle('システムログ - 最新50件');
       
-      ui.alert(
-        'システムログ',
-        combinedLogs,
-        ui.ButtonSet.OK
-      );
-    }
+    SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'システムログ - 最新50件');
+    
+    logSystemActivityEnhanced('showSystemLogs', `システムログ表示完了: ${filteredLogs.length}件表示`, 'INFO', 'システム');
     
     return 'ログを表示しました。';
   } catch (error) {
-    console.log('ログ表示エラー: ' + error.toString());
+    logSystemActivityEnhanced('showSystemLogs', `ログ表示エラー: ${error.message}`, 'ERROR', 'システム');
     Logger.log('ログ表示エラー: ' + error.toString());
     throw new Error('ログ表示に失敗しました: ' + error.message);
   }
 }
 
-/**
- * 最新の実行履歴からログ情報を取得
- * @return {string} 実行ログ情報
- */
-function getRecentExecutionLogs() {
-  try {
-    // PropertiesServiceを使用してログ情報を保存・取得
-    const properties = PropertiesService.getScriptProperties();
-    const storedLogs = properties.getProperty('systemExecutionLogs');
-    
-    if (storedLogs) {
-      const logs = JSON.parse(storedLogs);
-      const recentLogs = logs.slice(-20); // 最新20件
-      
-      return recentLogs.map(log => {
-        const timestamp = new Date(log.timestamp).toLocaleString('ja-JP');
-        return `${timestamp} - ${log.functionName}: ${log.message}`;
-      }).join('\n');
-    }
-    
-    return '';
-  } catch (error) {
-    console.log('実行ログ取得エラー: ' + error.toString());
-    return '実行ログの取得に失敗しました: ' + error.message;
-  }
-}
+
 
 /**
  * システムログを記録する関数
@@ -738,8 +709,8 @@ function showLogFilterDialog() {
         <!-- 表示形式 -->
         <div style="margin-bottom: 15px;">
           <label style="font-weight: bold;">表示形式:</label><br>
-          <label><input type="radio" name="displayMode" value="standard" checked> 標準表示</label><br>
-          <label><input type="radio" name="displayMode" value="enhanced"> 拡張表示（色分け・構造化）</label>
+          <label><input type="radio" name="displayMode" value="enhanced" checked> 標準表示（色分け・構造化）</label><br>
+          <label><input type="radio" name="displayMode" value="standard"> シンプル表示（テキスト形式）</label>
         </div>
         
         <div>
@@ -1421,28 +1392,3 @@ function runTransferDataCsvTest() {
   }
 }
 
-/**
- * 拡張ログ表示のクイックアクセス（最新50件・全レベル・全カテゴリ）
- */
-function showEnhancedLogsQuick() {
-  try {
-    logSystemActivityEnhanced('showEnhancedLogsQuick', '拡張ログ表示（クイックアクセス）開始', 'INFO', 'システム');
-    
-    // デフォルトフィルタ設定（最新50件・全レベル・全カテゴリ）
-    const defaultFilters = {
-      levels: ['INFO', 'WARNING', 'ERROR'],
-      categories: ['CSV取込', 'データ検証', 'ファイル生成', '自動補完', 'マスタ管理', 'システム'],
-      displayCount: 50,
-      keyword: '',
-      displayMode: 'enhanced'
-    };
-    
-    // 拡張表示を実行
-    showFilteredLogsEnhanced(defaultFilters);
-    
-  } catch (error) {
-    logSystemActivityEnhanced('showEnhancedLogsQuick', `クイックアクセスエラー: ${error.message}`, 'ERROR', 'システム');
-    Logger.log('拡張ログクイックアクセスエラー: ' + error.toString());
-    throw new Error('拡張ログ表示に失敗しました: ' + error.message);
-  }
-} 
