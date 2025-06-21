@@ -133,7 +133,7 @@ const VALIDATION_RULES = {
 // ===== 全銀協フォーマット定数 =====
 const ZENGIN_FORMAT = {
   RECORD_LENGTH: 120,          // レコード長（バイト）
-  ENCODING: 'JIS',             // 文字コード（全銀協標準）
+  ENCODING: 'Shift_JIS',       // 文字コード（全銀協標準）
   HEADER_TYPE: '1',           // ヘッダレコード種別
   DATA_TYPE: '2',             // データレコード種別
   TRAILER_TYPE: '8',          // トレーラレコード種別
@@ -171,4 +171,114 @@ const UI_CONFIG = {
   DIALOG_WIDTH: 400,
   DIALOG_HEIGHT: 300,
   MAX_DISPLAY_ROWS: 1000
-}; 
+};
+
+// ===== マスキング用ユーティリティ関数 =====
+
+/**
+ * 口座番号をマスキング
+ * @param {string} accountNumber - 口座番号
+ * @return {string} マスキングされた口座番号
+ */
+function maskAccountNumber(accountNumber) {
+  if (!accountNumber) return '****';
+  const str = String(accountNumber);
+  if (str.length <= 4) return '****';
+  return str.slice(0, 2) + '*'.repeat(str.length - 4) + str.slice(-2);
+}
+
+/**
+ * 銀行コード・支店コードをマスキング
+ * @param {string} code - コード
+ * @return {string} マスキングされたコード
+ */
+function maskBankCode(code) {
+  if (!code) return '****';
+  const str = String(code);
+  if (str.length <= 2) return '**';
+  return str.slice(0, 1) + '*'.repeat(str.length - 2) + str.slice(-1);
+}
+
+/**
+ * 受取人名をマスキング
+ * @param {string} name - 受取人名
+ * @return {string} マスキングされた受取人名
+ */
+function maskRecipientName(name) {
+  if (!name) return '****';
+  const str = String(name);
+  if (str.length <= 2) return '**';
+  // 最初の2文字と最後の1文字を残して中間をマスク
+  return str.slice(0, 2) + '*'.repeat(Math.max(1, str.length - 3)) + str.slice(-1);
+}
+
+/**
+ * 金額をマスキング（桁数のみ表示）
+ * @param {number} amount - 金額
+ * @return {string} マスキングされた金額表示
+ */
+function maskAmount(amount) {
+  if (!amount) return '0円';
+  const str = String(Math.floor(amount));
+  return '*'.repeat(str.length) + '円（' + str.length + '桁）';
+}
+
+// ===== ログレベル管理システム =====
+
+/**
+ * ログレベル定義
+ */
+const LOG_LEVEL = {
+  ERROR: 1,    // エラーのみ
+  WARNING: 2,  // 警告以上
+  INFO: 3,     // 通常情報以上
+  DEBUG: 4     // 全てのログ
+};
+
+/**
+ * 現在のログレベル（本番環境ではINFO、開発時はDEBUG）
+ */
+const CURRENT_LOG_LEVEL = LOG_LEVEL.INFO;
+
+/**
+ * ログレベルに応じたログ出力
+ * @param {number} level - ログレベル
+ * @param {string} message - ログメッセージ
+ */
+function logWithLevel(level, message) {
+  if (level <= CURRENT_LOG_LEVEL) {
+    Logger.log(message);
+  }
+}
+
+/**
+ * デバッグログ
+ * @param {string} message - メッセージ
+ */
+function logDebug(message) {
+  logWithLevel(LOG_LEVEL.DEBUG, `[DEBUG] ${message}`);
+}
+
+/**
+ * 情報ログ
+ * @param {string} message - メッセージ
+ */
+function logInfo(message) {
+  logWithLevel(LOG_LEVEL.INFO, `[INFO] ${message}`);
+}
+
+/**
+ * 警告ログ
+ * @param {string} message - メッセージ
+ */
+function logWarning(message) {
+  logWithLevel(LOG_LEVEL.WARNING, `[WARNING] ${message}`);
+}
+
+/**
+ * エラーログ
+ * @param {string} message - メッセージ
+ */
+function logError(message) {
+  logWithLevel(LOG_LEVEL.ERROR, `[ERROR] ${message}`);
+} 

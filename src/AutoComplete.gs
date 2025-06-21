@@ -107,7 +107,7 @@ function autoCompleteBankName(sheet, row, bankCode) {
   const bankName = findBankName(bankCode);
   if (bankName) {
     sheet.getRange(row, TRANSFER_DATA_COLUMNS.BANK_NAME).setValue(bankName);
-    Logger.log(`銀行名自動補完: 行${row}, ${bankCode} -> ${bankName}`);
+    Logger.log(`銀行名自動補完: 行${row}, ${maskBankCode(bankCode)} -> ${bankName}`);
   }
 }
 
@@ -122,7 +122,7 @@ function autoCompleteBranchName(sheet, row, bankCode, branchCode) {
   const branchName = findBranchName(bankCode, branchCode);
   if (branchName) {
     sheet.getRange(row, TRANSFER_DATA_COLUMNS.BRANCH_NAME).setValue(branchName);
-    Logger.log(`支店名自動補完: 行${row}, ${bankCode}-${branchCode} -> ${branchName}`);
+    Logger.log(`支店名自動補完: 行${row}, ${maskBankCode(bankCode)}-${maskBankCode(branchCode)} -> ${branchName}`);
   }
 }
 
@@ -174,6 +174,20 @@ function findBranchName(bankCode, branchCode) {
  */
 function getBankMasterData() {
   try {
+    // キャッシュチェック
+    const cache = CacheService.getScriptCache();
+    const cacheKey = CACHE_CONFIG.BANK_MASTER_KEY + '_v2';
+    const cached = cache.get(cacheKey);
+    
+    if (cached) {
+      logSystemActivity('getBankMasterData', 'キャッシュからデータ取得', 'INFO');
+      Logger.log('金融機関マスタデータ: キャッシュヒット');
+      return JSON.parse(cached);
+    }
+    
+    logSystemActivity('getBankMasterData', 'キャッシュミス - スプレッドシートから取得', 'INFO');
+    Logger.log('金融機関マスタデータ: キャッシュミス');
+    
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = spreadsheet.getSheetByName(SHEET_NAMES.BANK_MASTER);
     
@@ -207,7 +221,8 @@ function getBankMasterData() {
         normalizedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1] = String(normalizedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1]).padStart(VALIDATION_RULES.BRANCH_CODE_LENGTH, '0');
       }
       
-      Logger.log(`マスタデータ正規化: 銀行 ${row[BANK_MASTER_COLUMNS.BANK_CODE - 1]} -> ${normalizedRow[BANK_MASTER_COLUMNS.BANK_CODE - 1]}, 支店 ${row[BANK_MASTER_COLUMNS.BRANCH_CODE - 1]} -> ${normalizedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1]}`);
+      // 詳細なログは削減（性能改善）
+      // Logger.log(`マスタデータ正規化: 銀行 ${maskBankCode(row[BANK_MASTER_COLUMNS.BANK_CODE - 1])} -> ${maskBankCode(normalizedRow[BANK_MASTER_COLUMNS.BANK_CODE - 1])}, 支店 ${maskBankCode(row[BANK_MASTER_COLUMNS.BRANCH_CODE - 1])} -> ${maskBankCode(normalizedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1])}`);
       
       return normalizedRow;
     });
@@ -218,6 +233,15 @@ function getBankMasterData() {
              row[BANK_MASTER_COLUMNS.BANK_CODE - 1] && 
              row[BANK_MASTER_COLUMNS.BANK_NAME - 1];
     });
+    
+    // キャッシュに保存（5分間）
+    try {
+      cache.put(cacheKey, JSON.stringify(filteredData), 300); // 300秒 = 5分
+      logSystemActivity('getBankMasterData', 'データをキャッシュに保存', 'INFO');
+    } catch (cacheError) {
+      // キャッシュエラーは無視（データは正常に取得できている）
+      Logger.log('キャッシュ保存エラー（無視）: ' + cacheError.toString());
+    }
     
     logSystemActivity('getBankMasterData', `金融機関マスタデータ取得完了: ${filteredData.length}件`, 'INFO');
     Logger.log(`金融機関マスタデータ取得: ${filteredData.length}件`);
@@ -241,21 +265,21 @@ function bulkAutoComplete() {
   let failures = 0;
   
   try {
-    Logger.log('=== 一括補完デバッグ開始 ===');
+    logInfo('一括補完開始');
     
     // キャッシュをクリアして最新データを取得
     const cache = CacheService.getScriptCache();
     cache.remove(CACHE_CONFIG.BANK_MASTER_KEY);
-    Logger.log('キャッシュクリア完了');
+    logDebug('キャッシュクリア完了');
     
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRANSFER_DATA);
     if (!sheet) {
       throw new Error('振込データシートが見つかりません');
     }
-    Logger.log(`振込データシート名: ${sheet.getName()}`);
+    logDebug(`振込データシート名: ${sheet.getName()}`);
     
     const lastRow = sheet.getLastRow();
-    Logger.log(`最終行: ${lastRow}`);
+    logDebug(`最終行: ${lastRow}`);
     if (lastRow <= 1) {
       return {
         totalRows: 0,
@@ -268,20 +292,15 @@ function bulkAutoComplete() {
     
     // マスタデータを事前に取得
     const masterData = getBankMasterData();
-    Logger.log(`マスタデータ件数: ${masterData.length}`);
+    logInfo(`マスタデータ件数: ${masterData.length}`);
     if (masterData.length === 0) {
       throw new Error('金融機関マスタデータが存在しません');
-    }
-    
-    // マスタデータの最初の数件をログ出力
-    for (let i = 0; i < Math.min(3, masterData.length); i++) {
-      Logger.log(`マスタデータ[${i}]: ${JSON.stringify(masterData[i])}`);
     }
     
     // 一括処理用のデータ準備
     const dataRange = sheet.getRange(2, 1, lastRow - 1, Object.keys(TRANSFER_DATA_COLUMNS).length);
     const values = dataRange.getValues();
-    const updates = [];
+    let hasUpdates = false;
     
     for (let i = 0; i < values.length; i++) {
       const row = values[i];
@@ -289,7 +308,7 @@ function bulkAutoComplete() {
       
       // 空行スキップ
       if (isEmptyRow(row)) {
-        Logger.log(`行${rowNum}: 空行のためスキップ`);
+        logDebug(`行${rowNum}: 空行のためスキップ`);
         continue;
       }
       
@@ -302,27 +321,20 @@ function bulkAutoComplete() {
       const bankCode = normalizeCode(rawBankCode, VALIDATION_RULES.BANK_CODE_LENGTH);
       const branchCode = normalizeCode(rawBranchCode, VALIDATION_RULES.BRANCH_CODE_LENGTH);
       
-      Logger.log(`行${rowNum}: 生銀行コード="${rawBankCode}", 正規化後="${bankCode}", 生支店コード="${rawBranchCode}", 正規化後="${branchCode}"`);
-      Logger.log(`行${rowNum}: 現在の銀行名="${currentBankName}", 現在の支店名="${currentBranchName}"`);
+      logDebug(`行${rowNum}: 銀行=${bankCode}, 支店=${branchCode}`);
       
       // 銀行コードがある場合の銀行名補完
       if (bankCode && bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && !currentBankName) {
-        Logger.log(`行${rowNum}: 銀行名補完を試行 - 銀行コード: ${bankCode}`);
         const bankName = findBankNameFromCache(masterData, bankCode);
         if (bankName) {
-          Logger.log(`行${rowNum}: 銀行名補完成功 - ${bankCode} -> ${bankName}`);
-          updates.push({
-            row: rowNum,
-            col: TRANSFER_DATA_COLUMNS.BANK_NAME,
-            value: bankName
-          });
+          logDebug(`行${rowNum}: 銀行名補完成功 - ${bankCode} -> ${bankName}`);
+          values[i][TRANSFER_DATA_COLUMNS.BANK_NAME - 1] = bankName;
           bankNameCompletions++;
+          hasUpdates = true;
         } else {
-          Logger.log(`行${rowNum}: 銀行名補完失敗 - 銀行コード ${bankCode} が見つかりません`);
+          logDebug(`行${rowNum}: 銀行名補完失敗 - 銀行コード ${bankCode} が見つかりません`);
           failures++;
         }
-      } else {
-        Logger.log(`行${rowNum}: 銀行名補完条件不一致 - コード長=${bankCode.length}, 現在名="${currentBankName}"`);
       }
       
       // 支店コードがある場合の支店名補完
@@ -330,34 +342,27 @@ function bulkAutoComplete() {
           bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && 
           branchCode.length === VALIDATION_RULES.BRANCH_CODE_LENGTH && 
           !currentBranchName) {
-        Logger.log(`行${rowNum}: 支店名補完を試行 - 銀行コード: ${bankCode}, 支店コード: ${branchCode}`);
         const branchName = findBranchNameFromCache(masterData, bankCode, branchCode);
         if (branchName) {
-          Logger.log(`行${rowNum}: 支店名補完成功 - ${bankCode}-${branchCode} -> ${branchName}`);
-          updates.push({
-            row: rowNum,
-            col: TRANSFER_DATA_COLUMNS.BRANCH_NAME,
-            value: branchName
-          });
+          logDebug(`行${rowNum}: 支店名補完成功 - ${bankCode}-${branchCode} -> ${branchName}`);
+          values[i][TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] = branchName;
           branchNameCompletions++;
+          hasUpdates = true;
         } else {
-          Logger.log(`行${rowNum}: 支店名補完失敗 - ${bankCode}-${branchCode} が見つかりません`);
+          logDebug(`行${rowNum}: 支店名補完失敗 - ${bankCode}-${branchCode} が見つかりません`);
           failures++;
         }
-      } else {
-        Logger.log(`行${rowNum}: 支店名補完条件不一致 - 銀行コード長=${bankCode.length}, 支店コード長=${branchCode.length}, 現在名="${currentBranchName}"`);
       }
     }
     
-    // 一括更新実行
-    if (updates.length > 0) {
-      updates.forEach(update => {
-        sheet.getRange(update.row, update.col).setValue(update.value);
-      });
+    // 一括更新実行（バッチ処理）
+    if (hasUpdates) {
+      dataRange.setValues(values);
+      logInfo('一括更新完了（バッチ処理）');
     }
     
     const processingTime = Date.now() - startTime;
-    Logger.log(`一括補完完了: 銀行名${bankNameCompletions}件, 支店名${branchNameCompletions}件, 失敗${failures}件, 処理時間${processingTime}ms`);
+    logInfo(`一括補完完了: 銀行名${bankNameCompletions}件, 支店名${branchNameCompletions}件, 失敗${failures}件, 処理時間${processingTime}ms`);
     
     return {
       totalRows: lastRow - 1,
@@ -367,7 +372,7 @@ function bulkAutoComplete() {
       processingTime
     };
   } catch (error) {
-    Logger.log('一括補完エラー: ' + error.toString());
+    logError('一括補完エラー: ' + error.toString());
     throw error;
   }
 }
@@ -379,19 +384,19 @@ function bulkAutoComplete() {
  * @return {string|null} 銀行名またはnull
  */
 function findBankNameFromCache(masterData, bankCode) {
-  Logger.log(`銀行名検索: ${bankCode} をマスタデータから検索中...`);
+  logDebug(`銀行名検索: ${bankCode}`);
   
   const bankRow = masterData.find(row => {
     const rowBankCode = String(row[BANK_MASTER_COLUMNS.BANK_CODE - 1] || '').trim();
     const rowStatus = String(row[BANK_MASTER_COLUMNS.STATUS - 1] || '').trim();
     
-    Logger.log(`  比較中: マスタ銀行コード="${rowBankCode}", 状態="${rowStatus}"`);
-    
     return rowBankCode == bankCode && rowStatus === '有効';
   });
   
   const result = bankRow ? bankRow[BANK_MASTER_COLUMNS.BANK_NAME - 1] : null;
-  Logger.log(`銀行名検索結果: ${bankCode} -> ${result}`);
+  if (result) {
+    logDebug(`銀行名検索結果: ${bankCode} -> ${result}`);
+  }
   return result;
 }
 
@@ -403,20 +408,20 @@ function findBankNameFromCache(masterData, bankCode) {
  * @return {string|null} 支店名またはnull
  */
 function findBranchNameFromCache(masterData, bankCode, branchCode) {
-  Logger.log(`支店名検索: ${bankCode}-${branchCode} をマスタデータから検索中...`);
+  logDebug(`支店名検索: ${bankCode}-${branchCode}`);
   
   const branchRow = masterData.find(row => {
     const rowBankCode = String(row[BANK_MASTER_COLUMNS.BANK_CODE - 1] || '').trim();
     const rowBranchCode = String(row[BANK_MASTER_COLUMNS.BRANCH_CODE - 1] || '').trim();
     const rowStatus = String(row[BANK_MASTER_COLUMNS.STATUS - 1] || '').trim();
     
-    Logger.log(`  比較中: マスタ銀行コード="${rowBankCode}", マスタ支店コード="${rowBranchCode}", 状態="${rowStatus}"`);
-    
     return rowBankCode == bankCode && rowBranchCode == branchCode && rowStatus === '有効';
   });
   
   const result = branchRow ? branchRow[BANK_MASTER_COLUMNS.BRANCH_NAME - 1] : null;
-  Logger.log(`支店名検索結果: ${bankCode}-${branchCode} -> ${result}`);
+  if (result) {
+    logDebug(`支店名検索結果: ${bankCode}-${branchCode} -> ${result}`);
+  }
   return result;
 }
 
@@ -585,8 +590,6 @@ function refreshMasterDataCache() {
     throw error;
   }
 }
-
-
 
 /**
  * 数値コードを適切な桁数に0埋めして正規化

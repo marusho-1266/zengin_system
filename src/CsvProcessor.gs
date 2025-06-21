@@ -192,20 +192,41 @@ function importBankMasterFromCsv(csvData, duplicateCheck = true) {
       
       // 新しいデータの処理
       const processedRows = [];
+      const updatedRows = new Map(); // 更新データを一時保存
       
       for (const csvRow of dataRows) {
         const processedRow = processBankMasterDataRow(csvRow);
         const key = `${processedRow[BANK_MASTER_COLUMNS.BANK_CODE - 1]}-${processedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1]}`;
         
         if (existingMap.has(key)) {
-          // 既存データの更新
+          // 既存データの更新（メモリ上で管理）
           const existing = existingMap.get(key);
-          sheet.getRange(existing.index, 1, 1, processedRow.length).setValues([processedRow]);
+          updatedRows.set(existing.index, processedRow);
           updateCount++;
         } else {
           // 新規データとして追加
           processedRows.push(processedRow);
           newDataCount++;
+        }
+      }
+      
+      // 既存データの更新をバッチ処理
+      if (updatedRows.size > 0) {
+        // 既存データ全体を取得
+        const lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          const allData = sheet.getRange(2, 1, lastRow - 1, Object.keys(BANK_MASTER_COLUMNS).length).getValues();
+          
+          // 更新データを反映
+          updatedRows.forEach((row, rowIndex) => {
+            const arrayIndex = rowIndex - 2; // 配列インデックスに変換
+            if (arrayIndex >= 0 && arrayIndex < allData.length) {
+              allData[arrayIndex] = row;
+            }
+          });
+          
+          // 一括更新
+          sheet.getRange(2, 1, allData.length, allData[0].length).setValues(allData);
         }
       }
       
@@ -460,9 +481,9 @@ function processTransferDataRow(csvRow) {
   result[TRANSFER_DATA_COLUMNS.ACCOUNT_NUMBER - 1] = (csvRow[3] || '').toString().trim(); // 口座番号
   result[TRANSFER_DATA_COLUMNS.RECIPIENT_NAME - 1] = (csvRow[4] || '').toString().trim(); // 受取人名
   
-  // 振込金額は数値に変換
+  // 振込金額は整数に変換（全銀協フォーマットは整数のみ対応）
   const amount = (csvRow[5] || '').toString().trim();
-  result[TRANSFER_DATA_COLUMNS.AMOUNT - 1] = amount ? parseFloat(amount) : '';
+  result[TRANSFER_DATA_COLUMNS.AMOUNT - 1] = amount ? Math.floor(parseFloat(amount)) : '';
   
   // オプション項目
   result[TRANSFER_DATA_COLUMNS.CUSTOMER_CODE - 1] = (csvRow[6] || '').toString().trim(); // 顧客コード
@@ -525,12 +546,6 @@ function debugCsvData(csvData) {
     Logger.log('デバッグエラー: ' + error.toString());
   }
 }
-
-
-
-
-
-
 
 /**
  * 事前検証：全行をチェックしてエラー行を特定
