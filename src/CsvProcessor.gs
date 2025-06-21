@@ -526,103 +526,11 @@ function debugCsvData(csvData) {
   }
 }
 
-/**
- * テスト用金融機関マスタCSV取込
- */
-function testBankMasterCsvImport() {
-  try {
-    // テストCSVデータ
-    const testCsvData = `銀行コード,銀行名,支店コード,支店名,更新日,状態
-0001,ﾐｽﾞﾎ,001,ﾄｳｷｮｳｴｲｷﾞｮｳﾌﾞ,2025-01-16,有効
-0005,ﾐﾂﾋﾞｼUFJ,002,ﾏﾙﾉｳﾁ,2025-01-16,有効`;
-    
-    Logger.log('テスト用CSV取込開始');
-    debugCsvData(testCsvData);
-    
-    const result = importBankMasterFromCsv(testCsvData, false);
-    Logger.log('取込結果: ' + result);
-    
-  } catch (error) {
-    Logger.log('テストエラー: ' + error.toString());
-  }
-}
 
-/**
- * 受取人名の検証テスト
- */
-function testRecipientNameValidation() {
-  try {
-    Logger.log('=== 受取人名検証テスト開始 ===');
-    
-    const testNames = [
-      'ﾔﾏﾀﾞ ﾀﾛｳ',
-      'ｻﾄｳ ﾊﾅｺ',
-      'ｽｽﾞｷ ｼﾞﾛｳ',
-      'ﾀﾅｶ ﾐｻｷ',
-      'ｱﾍﾞ ﾊﾙﾄ',
-      'ﾔﾏｶﾞﾀ ﾕｳﾀ',
-      'ﾌｼﾞﾜﾗ ﾀｸﾐ',
-      'ﾏﾂﾓﾄ ﾋﾛｼ'
-    ];
-    
-    const regex = /^[ｱ-ﾝｧ-ｯﾞﾟｰ ]+$/;
-    
-    testNames.forEach((name, index) => {
-      const isValid = regex.test(name);
-      Logger.log(`テスト${index + 1}: "${name}" -> ${isValid ? 'OK' : 'NG'}`);
-      
-      // 文字コードも確認
-      const charCodes = [];
-      for (let i = 0; i < name.length; i++) {
-        charCodes.push(`${name[i]}(${name.charCodeAt(i)})`);
-      }
-      Logger.log(`  文字コード: ${charCodes.join(', ')}`);
-    });
-    
-    Logger.log('=== 受取人名検証テスト終了 ===');
-    return { success: true };
-    
-  } catch (error) {
-    Logger.log('受取人名検証テストエラー: ' + error.toString());
-    return { success: false, error: error.message };
-  }
-}
 
-/**
- * 振込データCSVのテスト取込
- */
-function testTransferDataCsvImport() {
-  try {
-    Logger.log('=== 振込データCSVテスト開始 ===');
-    
-    // テストCSVデータ（最初の3行のみ）
-    const testCsvData = `銀行コード,銀行名,支店コード,支店名,預金種目,口座番号,受取人名,振込金額,顧客コード,識別表示,EDI情報
-0001,みずほ銀行,001,東京営業部,1,1234567,ﾔﾏﾀﾞ ﾀﾛｳ,250000,C001,Y,SAL202506
-0005,三菱UFJ銀行,002,丸の内支店,1,2345678,ｻﾄｳ ﾊﾅｺ,180000,C002,Y,SAL202506`;
-    
-    Logger.log('解析開始...');
-    const parsedData = parseCSV(testCsvData);
-    Logger.log(`解析行数: ${parsedData.length}`);
-    
-    // ヘッダーを除いたデータ行を検証
-    const dataRows = parsedData.slice(1);
-    Logger.log('検証開始...');
-    const validationResult = validateCsvData(dataRows);
-    
-    Logger.log(`検証結果: ${validationResult.isValid ? 'OK' : 'NG'}`);
-    if (!validationResult.isValid) {
-      Logger.log('エラー内容:');
-      validationResult.errors.forEach(error => Logger.log(`  - ${error}`));
-    }
-    
-    Logger.log('=== 振込データCSVテスト終了 ===');
-    return { success: true, isValid: validationResult.isValid, errors: validationResult.errors };
-    
-  } catch (error) {
-    Logger.log('振込データCSVテストエラー: ' + error.toString());
-    return { success: false, error: error.message };
-  }
-}
+
+
+
 
 /**
  * 事前検証：全行をチェックしてエラー行を特定

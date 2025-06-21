@@ -25,16 +25,7 @@ function createCustomMenu() {
   menu.addSeparator();
   menu.addItem('データ検証', 'validateAllData');
   
-  // デバッグ・テスト機能
-  const debugSubmenu = ui.createMenu('デバッグ・テスト');
-  debugSubmenu.addItem('Shift_JIS変換テスト', 'runShiftJISTest');
-  debugSubmenu.addItem('ファイル生成デバッグ', 'runZenginFileDebug');
-  debugSubmenu.addItem('自動補完テスト', 'runAutoCompleteTest');
-  debugSubmenu.addItem('金融機関マスタCSV取込テスト', 'runBankMasterCsvTest');
-  debugSubmenu.addItem('受取人名検証テスト', 'runRecipientNameTest');
-  debugSubmenu.addItem('振込データCSV取込テスト', 'runTransferDataCsvTest');
-  
-  menu.addSubMenu(debugSubmenu);
+
   
   // 金融機関マスタ管理サブメニュー
   const bankMasterSubmenu = ui.createMenu('金融機関マスタ管理');
@@ -410,14 +401,19 @@ function cleanupBankMasterData() {
     if (response === ui.Button.YES) {
       const result = cleanupMasterData();
       
-      ui.alert(
-        '整備完了',
-        `マスタデータ整備が完了しました。\n\n` +
+      let message = `マスタデータ整備が完了しました。\n\n` +
         `重複削除件数: ${result.duplicatesRemoved}件\n` +
         `データ修正件数: ${result.dataFixed}件\n` +
-        `無効データ件数: ${result.invalidData}件`,
-        ui.ButtonSet.OK
-      );
+        `無効データ件数: ${result.invalidData}件`;
+      
+      if (result.invalidDataDetails && result.invalidDataDetails.length > 0) {
+        message += `\n\n無効データ詳細:`;
+        result.invalidDataDetails.forEach(detail => {
+          message += `\n行${detail.row}: ${detail.reasons.join(', ')}`;
+        });
+      }
+      
+      ui.alert('整備完了', message, ui.ButtonSet.OK);
     }
   } catch (error) {
     Logger.log('マスタデータ整備エラー: ' + error.toString());
@@ -1080,207 +1076,15 @@ function escapeHtml(text) {
     .replace(/'/g, '&#x27;');
 }
 
-/**
- * Shift_JIS変換テストの実行
- */
-function runShiftJISTest() {
-  try {
-    const testString = 'ﾃｽﾄｷｷﾞｮｳ ABC123 ･';
-    const result = testShiftJISConversion(testString);
-    
-    if (result.success) {
-      SpreadsheetApp.getUi().alert(
-        'Shift_JIS変換テスト結果',
-        `入力文字列: "${result.input}"\n` +
-        `変換後バイト数: ${result.byteCount}バイト\n` +
-        `16進表示: ${result.hexBytes}\n\n` +
-        '詳細はログをご確認ください。',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    } else {
-      SpreadsheetApp.getUi().alert(
-        'テストエラー',
-        'Shift_JIS変換テストに失敗しました: ' + result.error,
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    }
-  } catch (error) {
-    Logger.log('Shift_JISテストエラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'エラー',
-      'テスト実行中にエラーが発生しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 
-/**
- * 全銀協ファイル生成デバッグの実行
- */
-function runZenginFileDebug() {
-  try {
-    const result = createZenginFormatFileDebug();
-    
-    if (result.success) {
-      let message = `ファイル生成デバッグ完了\n\n` +
-                   `ファイル名: ${result.fileName}\n` +
-                   `処理件数: ${result.recordCount}件\n` +
-                   `ファイルID: ${result.fileId}`;
-      
-      if (result.debugInfo) {
-        message += `\n\n【デバッグ情報】\n` +
-                  `実際のファイルサイズ: ${result.debugInfo.actualFileSize}バイト\n` +
-                  `先頭20バイト: ${result.debugInfo.firstBytesHex}`;
-      }
-      
-      SpreadsheetApp.getUi().alert(
-        'デバッグ実行完了',
-        message + '\n\n詳細はログをご確認ください。',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    } else {
-      SpreadsheetApp.getUi().alert(
-        'デバッグエラー',
-        'デバッグ実行に失敗しました: ' + result.error,
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    }
-  } catch (error) {
-    Logger.log('デバッグ実行エラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'エラー',
-      'デバッグ実行中にエラーが発生しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 
-/**
- * 自動補完テストの実行
- */
-function runAutoCompleteTest() {
-  try {
-    const result = testAutoComplete();
-    
-    if (result.success) {
-      let message = `自動補完テスト完了\n\n` +
-                   `振込データシート発見: ${result.transferSheetFound ? 'はい' : 'いいえ'}\n` +
-                   `金融機関マスタシート発見: ${result.masterSheetFound ? 'はい' : 'いいえ'}\n` +
-                   `マスタデータ件数: ${result.masterDataCount}件\n` +
-                   `テスト銀行名検索(0001): ${result.testBankName || '見つかりません'}\n` +
-                   `テスト支店名検索(0001-021): ${result.testBranchName || '見つかりません'}`;
-      
-      SpreadsheetApp.getUi().alert(
-        '自動補完テスト結果',
-        message + '\n\n詳細はログをご確認ください。',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    } else {
-      SpreadsheetApp.getUi().alert(
-        'テストエラー',
-        '自動補完テストに失敗しました: ' + result.error,
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-    }
-  } catch (error) {
-    Logger.log('自動補完テストエラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'エラー',
-      'テスト実行中にエラーが発生しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 
-/**
- * 金融機関マスタCSV取込テストの実行
- */
-function runBankMasterCsvTest() {
-  try {
-    Logger.log('=== 金融機関マスタCSVテスト開始 ===');
-    
-    const result = testBankMasterCsvImport();
-    
-    SpreadsheetApp.getUi().alert(
-      '金融機関マスタCSVテスト結果',
-      'テストが完了しました。\n\n詳細はログをご確認ください。',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    
-    Logger.log('=== 金融機関マスタCSVテスト終了 ===');
-    
-  } catch (error) {
-    Logger.log('金融機関マスタCSVテストエラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'テストエラー',
-      '金融機関マスタCSVテストに失敗しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 
-/**
- * 受取人名検証テストの実行
- */
-function runRecipientNameTest() {
-  try {
-    Logger.log('=== 受取人名検証テスト開始 ===');
-    
-    const result = testRecipientNameValidation();
-    
-    SpreadsheetApp.getUi().alert(
-      '受取人名検証テスト結果',
-      'テストが完了しました。\n\n詳細はログをご確認ください。',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    
-    Logger.log('=== 受取人名検証テスト終了 ===');
-    
-  } catch (error) {
-    Logger.log('受取人名検証テストエラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'テストエラー',
-      '受取人名検証テストに失敗しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 
-/**
- * 振込データCSV取込テストの実行
- */
-function runTransferDataCsvTest() {
-  try {
-    Logger.log('=== 振込データCSV取込テスト開始 ===');
-    
-    const result = testTransferDataCsvImport();
-    
-    let message = 'テストが完了しました。\n\n';
-    if (result.success) {
-      message += `検証結果: ${result.isValid ? 'OK' : 'NG'}\n`;
-      if (!result.isValid && result.errors) {
-        message += `エラー数: ${result.errors.length}件\n`;
-      }
-    } else {
-      message += `エラー: ${result.error}\n`;
-    }
-    message += '\n詳細はログをご確認ください。';
-    
-    SpreadsheetApp.getUi().alert(
-      '振込データCSV取込テスト結果',
-      message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    
-    Logger.log('=== 振込データCSV取込テスト終了 ===');
-    
-  } catch (error) {
-    Logger.log('振込データCSV取込テストエラー: ' + error.toString());
-    SpreadsheetApp.getUi().alert(
-      'テストエラー',
-      '振込データCSV取込テストに失敗しました: ' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
+
+
+
+
+
+
 

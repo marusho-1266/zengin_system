@@ -442,12 +442,14 @@ function cleanupMasterData() {
     let duplicatesRemoved = 0;
     let dataFixed = 0;
     let invalidData = 0;
+    const invalidDataDetails = [];
     
     const seenKeys = new Set();
     const validRows = [];
     
     for (let i = 0; i < values.length; i++) {
       const row = values[i];
+      const rowNum = i + 2; // 実際の行番号（ヘッダー行を除く）
       
       // 空行スキップ
       if (isEmptyRow(row)) continue;
@@ -458,9 +460,48 @@ function cleanupMasterData() {
       let branchName = String(row[BANK_MASTER_COLUMNS.BRANCH_NAME - 1] || '').trim();
       let status = String(row[BANK_MASTER_COLUMNS.STATUS - 1] || '').trim();
       
-      // データ検証
-      if (!bankCode || !branchCode || bankCode.length !== 4 || branchCode.length !== 3) {
+      // データ検証（詳細な理由を記録）
+      const invalidReasons = [];
+      
+      if (!bankCode) {
+        invalidReasons.push('銀行コードが空白');
+      } else if (bankCode.length > 4) {
+        invalidReasons.push(`銀行コードが桁数オーバー(${bankCode.length}桁)`);
+      } else if (!/^\d+$/.test(bankCode)) {
+        invalidReasons.push('銀行コードに数字以外の文字');
+      }
+      
+      if (!branchCode) {
+        invalidReasons.push('支店コードが空白');
+      } else if (branchCode.length > 3) {
+        invalidReasons.push(`支店コードが桁数オーバー(${branchCode.length}桁)`);
+      } else if (!/^\d+$/.test(branchCode)) {
+        invalidReasons.push('支店コードに数字以外の文字');
+      }
+      
+      if (invalidReasons.length > 0) {
         invalidData++;
+        invalidDataDetails.push({
+          row: rowNum,
+          reasons: invalidReasons
+        });
+        
+        // 無効データも保持するが、重複チェックはスキップ
+        let updateDate = row[BANK_MASTER_COLUMNS.UPDATE_DATE - 1];
+        if (!updateDate || !(updateDate instanceof Date)) {
+          updateDate = new Date();
+        }
+        if (!status || (status !== '有効' && status !== '無効')) {
+          status = '有効';
+        }
+        validRows.push([
+          bankCode,
+          bankName,
+          branchCode,
+          branchName,
+          updateDate,
+          status
+        ]);
         continue;
       }
       
@@ -518,8 +559,13 @@ function cleanupMasterData() {
     CacheService.getScriptCache().remove(CACHE_CONFIG.BANK_MASTER_KEY);
     
     Logger.log(`マスタデータ整備完了: 重複削除${duplicatesRemoved}件, データ修正${dataFixed}件, 無効データ${invalidData}件`);
+    if (invalidDataDetails.length > 0) {
+      invalidDataDetails.forEach(detail => {
+        Logger.log(`無効データ行${detail.row}: ${detail.reasons.join(', ')}`);
+      });
+    }
     
-    return { duplicatesRemoved, dataFixed, invalidData };
+    return { duplicatesRemoved, dataFixed, invalidData, invalidDataDetails };
   } catch (error) {
     Logger.log('マスタデータ整備エラー: ' + error.toString());
     throw error;
@@ -540,74 +586,7 @@ function refreshMasterDataCache() {
   }
 }
 
-/**
- * 自動補完のテスト関数（デバッグ用）
- * @return {Object} テスト結果
- */
-function testAutoComplete() {
-  try {
-    Logger.log('=== 自動補完テスト開始 ===');
-    
-    // シート取得テスト
-    const transferSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRANSFER_DATA);
-    const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.BANK_MASTER);
-    
-    Logger.log(`振込データシート: ${transferSheet ? transferSheet.getName() : '見つかりません'}`);
-    Logger.log(`金融機関マスタシート: ${masterSheet ? masterSheet.getName() : '見つかりません'}`);
-    
-    if (!transferSheet || !masterSheet) {
-      return { success: false, error: 'シートが見つかりません' };
-    }
-    
-    // マスタデータ取得テスト
-    const masterData = getBankMasterData();
-    Logger.log(`マスタデータ件数: ${masterData.length}`);
-    
-    if (masterData.length > 0) {
-      Logger.log(`マスタデータサンプル: ${JSON.stringify(masterData[0])}`);
-    }
-    
-    // 振込データの内容確認
-    const transferLastRow = transferSheet.getLastRow();
-    Logger.log(`振込データ最終行: ${transferLastRow}`);
-    
-    if (transferLastRow > 1) {
-      const sampleRow = transferSheet.getRange(2, 1, 1, Object.keys(TRANSFER_DATA_COLUMNS).length).getValues()[0];
-      Logger.log(`振込データサンプル: ${JSON.stringify(sampleRow)}`);
-    }
-    
-    // 定数確認
-    Logger.log(`BANK_CODE列: ${TRANSFER_DATA_COLUMNS.BANK_CODE}`);
-    Logger.log(`BANK_NAME列: ${TRANSFER_DATA_COLUMNS.BANK_NAME}`);
-    Logger.log(`BRANCH_CODE列: ${TRANSFER_DATA_COLUMNS.BRANCH_CODE}`);
-    Logger.log(`BRANCH_NAME列: ${TRANSFER_DATA_COLUMNS.BRANCH_NAME}`);
-    Logger.log(`銀行コード長: ${VALIDATION_RULES.BANK_CODE_LENGTH}`);
-    Logger.log(`支店コード長: ${VALIDATION_RULES.BRANCH_CODE_LENGTH}`);
-    
-    // 検索テスト
-    const testBankCode = '0001';
-    const testBranchCode = '021';
-    
-    const bankName = findBankNameFromCache(masterData, testBankCode);
-    const branchName = findBranchNameFromCache(masterData, testBankCode, testBranchCode);
-    
-    Logger.log(`検索テスト結果: ${testBankCode} -> ${bankName}`);
-    Logger.log(`検索テスト結果: ${testBankCode}-${testBranchCode} -> ${branchName}`);
-    
-    return {
-      success: true,
-      transferSheetFound: !!transferSheet,
-      masterSheetFound: !!masterSheet,
-      masterDataCount: masterData.length,
-      testBankName: bankName,
-      testBranchName: branchName
-    };
-    
-  } catch (error) {
-    Logger.log('自動補完テストエラー: ' + error.toString());
-    return { success: false, error: error.message };
-  }
-}
+
 
 /**
  * 数値コードを適切な桁数に0埋めして正規化
