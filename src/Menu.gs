@@ -133,7 +133,7 @@ function showCsvImportDialog() {
  * 振込データ作成処理の実行
  */
 function generateZenginFile() {
-  const startTime = performance.now();
+  const startTime = new Date().getTime();
   try {
     logSystemActivityEnhanced('generateZenginFile', '振込データ作成処理開始', 'INFO', 'ファイル生成', { startTime: startTime });
     
@@ -141,7 +141,7 @@ function generateZenginFile() {
     const validationResult = validateAllData();
     
     if (!validationResult.isValid) {
-      const endTime = performance.now();
+      const endTime = new Date().getTime();
       logSystemActivityEnhanced('generateZenginFile', `データ検証エラー: ${validationResult.errors.length}件`, 'ERROR', 'ファイル生成', { 
         processingTime: Math.round(endTime - startTime),
         errorCount: validationResult.errors.length 
@@ -159,7 +159,7 @@ function generateZenginFile() {
     // 全銀協フォーマットファイルの生成
     const result = createZenginFormatFile();
     
-    const endTime = performance.now();
+    const endTime = new Date().getTime();
     const processingTime = Math.round(endTime - startTime);
     
     if (result.success) {
@@ -188,7 +188,7 @@ function generateZenginFile() {
       );
     }
   } catch (error) {
-    const endTime = performance.now();
+    const endTime = new Date().getTime();
     logSystemActivityEnhanced('generateZenginFile', `例外エラー: ${error.message}`, 'ERROR', 'ファイル生成', {
       processingTime: Math.round(endTime - startTime),
       error: error.message
@@ -206,7 +206,7 @@ function generateZenginFile() {
  * データ検証の実行
  */
 function validateAllData() {
-  const startTime = performance.now();
+  const startTime = new Date().getTime();
   try {
     logSystemActivityEnhanced('validateAllData', 'データ検証開始', 'INFO', 'データ検証', { startTime: startTime });
     
@@ -233,7 +233,7 @@ function validateAllData() {
     }
     
     const isValid = errors.length === 0;
-    const endTime = performance.now();
+    const endTime = new Date().getTime();
     const processingTime = Math.round(endTime - startTime);
     
     if (isValid && warnings.length === 0) {
@@ -278,7 +278,7 @@ function validateAllData() {
     
     return { isValid, errors, warnings };
   } catch (error) {
-    const endTime = performance.now();
+    const endTime = new Date().getTime();
     logSystemActivityEnhanced('validateAllData', `例外エラー: ${error.message}`, 'ERROR', 'データ検証', {
       processingTime: Math.round(endTime - startTime),
       error: error.message
@@ -706,13 +706,6 @@ function showLogFilterDialog() {
           <input type="text" id="searchKeyword" placeholder="検索キーワードを入力" style="width: 100%; padding: 5px;">
         </div>
         
-        <!-- 表示形式 -->
-        <div style="margin-bottom: 15px;">
-          <label style="font-weight: bold;">表示形式:</label><br>
-          <label><input type="radio" name="displayMode" value="enhanced" checked> 標準表示（色分け・構造化）</label><br>
-          <label><input type="radio" name="displayMode" value="standard"> シンプル表示（テキスト形式）</label>
-        </div>
-        
         <div>
           <button onclick="applyLogFilter()" style="width: 48%; padding: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 4%;">
             フィルタ適用
@@ -731,7 +724,7 @@ function showLogFilterDialog() {
             categories: [],
             displayCount: parseInt(document.getElementById('displayCount').value),
             keyword: document.getElementById('searchKeyword').value.trim(),
-            displayMode: document.querySelector('input[name="displayMode"]:checked').value
+            displayMode: 'enhanced' // 常にHTML形式を使用
           };
           
           // ログレベルフィルタ
@@ -747,20 +740,11 @@ function showLogFilterDialog() {
           if (document.getElementById('catマスタ管理').checked) filters.categories.push('マスタ管理');
           if (document.getElementById('catシステム').checked) filters.categories.push('システム');
           
-          // 表示形式に応じて適切な関数を呼び出し
-          if (filters.displayMode === 'enhanced') {
-            // 拡張表示
-            google.script.run
-              .withSuccessHandler(onFilterSuccess)
-              .withFailureHandler(onFilterFailure)
-              .showFilteredLogsEnhanced(filters);
-          } else {
-            // 標準表示
-            google.script.run
-              .withSuccessHandler(onFilterSuccess)
-              .withFailureHandler(onFilterFailure)
-              .showFilteredLogs(filters);
-          }
+          // 常にHTML形式のログ表示を使用
+          google.script.run
+            .withSuccessHandler(onFilterSuccess)
+            .withFailureHandler(onFilterFailure)
+            .showFilteredLogs(filters);
         }
         
         function onFilterSuccess(result) {
@@ -785,107 +769,15 @@ function showLogFilterDialog() {
   }
 }
 
+
+
 /**
- * フィルタ条件に基づいてログを表示
- * @param {Object} filters - フィルタ条件
+ * ログ表示（HTML形式・色分け・構造化表示）
+ * @param {Object} filters フィルタ条件
  */
 function showFilteredLogs(filters) {
   try {
-    logSystemActivityEnhanced('showFilteredLogs', `フィルタ適用: レベル[${filters.levels.join(',')}] カテゴリ[${filters.categories.join(',')}] 件数[${filters.displayCount}]`, 'INFO', 'システム');
-    
-    // PropertiesServiceからログデータを取得
-    const properties = PropertiesService.getScriptProperties();
-    const storedLogs = properties.getProperty('systemExecutionLogs');
-    
-    if (!storedLogs) {
-      SpreadsheetApp.getUi().alert(
-        'フィルタリング結果', 
-        'ログエントリがありません。', 
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-      return;
-    }
-    
-    let logs = JSON.parse(storedLogs);
-    
-    // フィルタリング処理
-    let filteredLogs = logs.filter(log => {
-      // ログレベルフィルタ
-      if (filters.levels.length > 0 && !filters.levels.includes(log.level)) {
-        return false;
-      }
-      
-      // 機能分類フィルタ（既存ログとの互換性を考慮）
-      if (filters.categories.length > 0) {
-        const logCategory = log.category || 'システム'; // デフォルト値
-        if (!filters.categories.includes(logCategory)) {
-          return false;
-        }
-      }
-      
-      // キーワード検索
-      if (filters.keyword && filters.keyword.length > 0) {
-        const searchText = `${log.functionName} ${log.message}`.toLowerCase();
-        if (!searchText.includes(filters.keyword.toLowerCase())) {
-          return false;
-        }
-      }
-      
-      return true;
-    });
-    
-    // 表示件数制限
-    filteredLogs = filteredLogs.slice(-filters.displayCount);
-    
-    // 結果表示
-    if (filteredLogs.length === 0) {
-      SpreadsheetApp.getUi().alert(
-        'フィルタリング結果', 
-        'フィルタ条件に一致するログが見つかりませんでした。', 
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-      return;
-    }
-    
-    // ログを整形して表示
-    const formattedLogs = filteredLogs.map(log => {
-      const timestamp = new Date(log.timestamp).toLocaleString('ja-JP');
-      const category = log.category || 'システム';
-      const details = log.details && log.details.processingTime ? 
-        ` (処理時間: ${log.details.processingTime}ms)` : '';
-      
-      return `[${log.level}][${category}] ${timestamp}\n  ${log.functionName}: ${log.message}${details}`;
-    }).join('\n\n');
-    
-    // 結果表示（8000文字制限対応）
-    let displayText = `【フィルタリング結果: ${filteredLogs.length}件】\n\n${formattedLogs}`;
-    
-    if (displayText.length > 8000) {
-      displayText = '...(結果が長いため最新部分のみ表示)\n\n' + displayText.slice(-8000);
-    }
-    
-    SpreadsheetApp.getUi().alert(
-      'フィルタリング結果',
-      displayText,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    
-    logSystemActivityEnhanced('showFilteredLogs', `フィルタリング完了: ${filteredLogs.length}件表示`, 'INFO', 'システム');
-    
-  } catch (error) {
-    logSystemActivityEnhanced('showFilteredLogs', `フィルタリングエラー: ${error.message}`, 'ERROR', 'システム');
-    Logger.log('フィルタリングエラー: ' + error.toString());
-    throw new Error('ログフィルタリングに失敗しました: ' + error.message);
-  }
-}
-
-/**
- * 拡張ログ表示（HTML形式・色分け・構造化表示）
- * @param {Object} filters フィルタ条件
- */
-function showFilteredLogsEnhanced(filters) {
-  try {
-    logSystemActivityEnhanced('showFilteredLogsEnhanced', `拡張ログ表示開始: レベル[${filters.levels.join(',')}] カテゴリ[${filters.categories.join(',')}] 件数[${filters.displayCount}]`, 'INFO', 'システム');
+    logSystemActivityEnhanced('showFilteredLogs', `ログ表示開始: レベル[${filters.levels.join(',')}] カテゴリ[${filters.categories.join(',')}] 件数[${filters.displayCount}]`, 'INFO', 'システム');
     
     // PropertiesServiceからログデータを取得
     const properties = PropertiesService.getScriptProperties();
@@ -946,16 +838,16 @@ function showFilteredLogsEnhanced(filters) {
     const htmlOutput = HtmlService.createHtmlOutput(htmlContent)
       .setWidth(900)
       .setHeight(600)
-      .setTitle('システムログ - 拡張表示');
+      .setTitle('システムログ - フィルタ表示');
       
-    SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'システムログ - 拡張表示');
+    SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'システムログ - フィルタ表示');
     
-    logSystemActivityEnhanced('showFilteredLogsEnhanced', `拡張ログ表示完了: ${filteredLogs.length}件表示`, 'INFO', 'システム');
+    logSystemActivityEnhanced('showFilteredLogs', `ログ表示完了: ${filteredLogs.length}件表示`, 'INFO', 'システム');
     
   } catch (error) {
-    logSystemActivityEnhanced('showFilteredLogsEnhanced', `拡張ログ表示エラー: ${error.message}`, 'ERROR', 'システム');
-    Logger.log('拡張ログ表示エラー: ' + error.toString());
-    throw new Error('拡張ログ表示に失敗しました: ' + error.message);
+    logSystemActivityEnhanced('showFilteredLogs', `ログ表示エラー: ${error.message}`, 'ERROR', 'システム');
+    Logger.log('ログ表示エラー: ' + error.toString());
+    throw new Error('ログ表示に失敗しました: ' + error.message);
   }
 }
 
