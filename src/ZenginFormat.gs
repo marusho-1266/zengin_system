@@ -35,7 +35,7 @@ function createZenginFormatFile() {
     
     // 2. データレコード
     for (let i = 0; i < transferData.length; i++) {
-      records.push(createDataRecord(transferData[i], i + 1));
+      records.push(createDataRecord(transferData[i], i + 1, clientInfo.data.nameOutputMode));
     }
     
     // 3. トレーラレコード
@@ -105,7 +105,8 @@ function getClientInfo() {
       accountType: extractSelectValue(sheet.getRange(CLIENT_INFO_CELLS.ACCOUNT_TYPE).getValue()),
       accountNumber: normalizeNumericCode(sheet.getRange(CLIENT_INFO_CELLS.ACCOUNT_NUMBER).getValue(), 7),
       categoryCode: normalizeNumericCode(sheet.getRange(CLIENT_INFO_CELLS.CATEGORY_CODE).getValue(), 2),
-      fileExtension: String(sheet.getRange(CLIENT_INFO_CELLS.FILE_EXTENSION).getValue() || '').trim()
+      fileExtension: String(sheet.getRange(CLIENT_INFO_CELLS.FILE_EXTENSION).getValue() || '').trim(),
+      nameOutputMode: String(sheet.getRange(CLIENT_INFO_CELLS.NAME_OUTPUT_MODE).getValue() || NAME_OUTPUT_MODES.STANDARD.value).trim()
     };
     
     // 基本的な必須項目チェック
@@ -158,7 +159,9 @@ function getTransferDataForFormat() {
       
       // 必須項目がある行のみ対象
       const bankCode = String(row[TRANSFER_DATA_COLUMNS.BANK_CODE - 1] || '').trim();
+      const bankName = String(row[TRANSFER_DATA_COLUMNS.BANK_NAME - 1] || '').trim();
       const branchCode = String(row[TRANSFER_DATA_COLUMNS.BRANCH_CODE - 1] || '').trim();
+      const branchName = String(row[TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] || '').trim();
       const accountNumber = String(row[TRANSFER_DATA_COLUMNS.ACCOUNT_NUMBER - 1] || '').trim();
       const recipientName = String(row[TRANSFER_DATA_COLUMNS.RECIPIENT_NAME - 1] || '').trim();
       const amount = row[TRANSFER_DATA_COLUMNS.AMOUNT - 1];
@@ -166,7 +169,9 @@ function getTransferDataForFormat() {
       if (bankCode && branchCode && accountNumber && recipientName && amount) {
         result.push({
           bankCode: normalizeNumericCode(bankCode, 4),
+          bankName,
           branchCode: normalizeNumericCode(branchCode, 3),
+          branchName,
           accountType: extractSelectValue(row[TRANSFER_DATA_COLUMNS.ACCOUNT_TYPE - 1]) || '1',
           accountNumber: normalizeNumericCode(accountNumber, 7),
           recipientName,
@@ -251,9 +256,10 @@ function createHeaderRecord(clientInfo, dataCount) {
  * データレコードの生成
  * @param {Object} transferData - 振込データ
  * @param {number} sequenceNumber - 連番
+ * @param {string} nameOutputMode - 銀行名・支店名出力モード
  * @return {string} データレコード（120バイト）
  */
-function createDataRecord(transferData, sequenceNumber) {
+function createDataRecord(transferData, sequenceNumber, nameOutputMode) {
   const fields = [];
   
   // 1. レコード種別（1桁）
@@ -262,35 +268,53 @@ function createDataRecord(transferData, sequenceNumber) {
   // 2. 銀行番号（4桁）
   fields.push(padLeft(transferData.bankCode, 4, '0'));
   
-  // 3. 支店番号（3桁）
+  // 3. 銀行名（15桁）- 標準モードではスペース埋め、名称出力モードでは実データ
+  if (nameOutputMode === NAME_OUTPUT_MODES.OUTPUT_NAME.value && transferData.bankName) {
+    fields.push(padRight(toHalfwidthKana(transferData.bankName), 15, ' '));
+  } else {
+    fields.push(padRight('', 15, ' '));
+  }
+  
+  // 4. 支店番号（3桁）
   fields.push(padLeft(transferData.branchCode, 3, '0'));
   
-  // 4. 預金種目（1桁）
+  // 5. 支店名（15桁）- 標準モードではスペース埋め、名称出力モードでは実データ
+  if (nameOutputMode === NAME_OUTPUT_MODES.OUTPUT_NAME.value && transferData.branchName) {
+    fields.push(padRight(toHalfwidthKana(transferData.branchName), 15, ' '));
+  } else {
+    fields.push(padRight('', 15, ' '));
+  }
+  
+  // 6. 手形交換所番号（4桁）- 未使用
+  fields.push(padRight('', 4, ' '));
+  
+  // 7. 預金種目（1桁）
   fields.push(transferData.accountType);
   
-  // 5. 口座番号（7桁）
+  // 8. 口座番号（7桁）
   fields.push(padLeft(transferData.accountNumber, 7, '0'));
   
-  // 6. 受取人名（30桁）- 半角カナ
+  // 9. 受取人名（30桁）- 半角カナ
   fields.push(padRight(toHalfwidthKana(transferData.recipientName), 30, ' '));
   
-  // 7. 振込金額（10桁）
+  // 10. 振込金額（10桁）
   fields.push(padLeft(String(Math.floor(transferData.amount)), 10, '0'));
   
-  // 8. 新規・変更区分（1桁）- 固定値'1'（新規）
+  // 11. 新規コード（1桁）- 固定値'1'
   fields.push('1');
   
-  // 9. 顧客コード（10桁）
-  fields.push(padRight(transferData.customerCode, 10, ' '));
+  // 12. 顧客番号（20桁）- EDI情報も統合
+  const customerInfo = transferData.customerCode + (transferData.ediInfo || '');
+  fields.push(padRight(customerInfo, 20, ' '));
   
-  // 10. 振込指定区分（1桁）- 固定値'7'（その他）
-  fields.push('7');
+  // 13. 振込指定区分（1桁）- 未使用
+  fields.push(' ');
   
-  // 11. 識別表示（1桁）
+  // 14. 識別表示（1桁）
   fields.push(transferData.identification || ' ');
   
-  // 12. ダミー（51桁）
-  fields.push(padRight('', 51, ' '));
+  // 15. ダミー（7桁）
+  fields.push(padRight('', 7, ' '));
   
   const record = fields.join('');
   
@@ -730,4 +754,64 @@ function createZenginFormatFileDebug() {
   
   Logger.log('=== 全銀協フォーマット生成デバッグ終了 ===');
   return result;
+}
+
+/**
+ * データレコードフォーマットのテスト（開発用）
+ * 標準モードと名称出力モードの違いを確認
+ */
+function testDataRecordFormat() {
+  const testData = {
+    bankCode: '0001',
+    bankName: 'ﾐｽﾞﾎ',
+    branchCode: '001',
+    branchName: 'ﾎﾝﾃﾝ',
+    accountType: '1',
+    accountNumber: '1234567',
+    recipientName: 'ﾀﾅｶ ﾀﾛｳ',
+    amount: 100000,
+    customerCode: 'EMP001',
+    identification: 'Y',
+    ediInfo: ''
+  };
+  
+  Logger.log('=== データレコードフォーマットテスト ===');
+  
+  // 標準モード
+  const standardRecord = createDataRecord(testData, 1, NAME_OUTPUT_MODES.STANDARD.value);
+  Logger.log('標準モード（銀行名・支店名スペース埋め）:');
+  Logger.log(standardRecord);
+  Logger.log(`レコード長: ${standardRecord.length}バイト`);
+  Logger.log('');
+  
+  // 名称出力モード
+  const nameOutputRecord = createDataRecord(testData, 1, NAME_OUTPUT_MODES.OUTPUT_NAME.value);
+  Logger.log('名称出力モード（銀行名・支店名出力）:');
+  Logger.log(nameOutputRecord);
+  Logger.log(`レコード長: ${nameOutputRecord.length}バイト`);
+  Logger.log('');
+  
+  // フィールド位置の詳細
+  Logger.log('フィールド位置（バイト単位）:');
+  Logger.log('1: レコード種別（1バイト）');
+  Logger.log('2-5: 銀行番号（4バイト）');
+  Logger.log('6-20: 銀行名（15バイト）← 標準/名称出力の違い');
+  Logger.log('21-23: 支店番号（3バイト）');
+  Logger.log('24-38: 支店名（15バイト）← 標準/名称出力の違い');
+  Logger.log('39-42: 手形交換所番号（4バイト）- 未使用');
+  Logger.log('43: 預金種目（1バイト）');
+  Logger.log('44-50: 口座番号（7バイト）');
+  Logger.log('51-80: 受取人名（30バイト）');
+  Logger.log('81-90: 振込金額（10バイト）');
+  Logger.log('91: 新規コード（1バイト）');
+  Logger.log('92-111: 顧客番号（20バイト）');
+  Logger.log('112: 振込指定区分（1バイト）- 未使用');
+  Logger.log('113: 識別表示（1バイト）');
+  Logger.log('114-120: ダミー（7バイト）');
+  
+  return {
+    standardRecord,
+    nameOutputRecord,
+    testData
+  };
 } 

@@ -88,6 +88,13 @@ function validateClientInfo() {
         required: true,
         type: 'select',
         validValues: FILE_EXTENSIONS
+      },
+      { 
+        cell: CLIENT_INFO_CELLS.NAME_OUTPUT_MODE, 
+        label: CLIENT_INFO_LABELS.NAME_OUTPUT_MODE, 
+        required: true,
+        type: 'select',
+        validValues: Object.values(NAME_OUTPUT_MODES).map(mode => mode.value)
       }
     ];
     
@@ -122,22 +129,34 @@ function validateClientInfo() {
 
 /**
  * 振込データの検証
- * @return {Object} 検証結果 { isValid: boolean, errors: string[] }
+ * @return {Object} 検証結果 { isValid: boolean, errors: string[], warnings: string[] }
  */
 function validateTransferData() {
   const errors = [];
+  const warnings = [];
   
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRANSFER_DATA);
     if (!sheet) {
       errors.push('振込データシートが見つかりません。');
-      return { isValid: false, errors };
+      return { isValid: false, errors, warnings };
+    }
+    
+    // 銀行名・支店名出力モードを取得
+    let nameOutputMode = NAME_OUTPUT_MODES.STANDARD.value;
+    try {
+      const clientSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.CLIENT_INFO);
+      if (clientSheet) {
+        nameOutputMode = String(clientSheet.getRange(CLIENT_INFO_CELLS.NAME_OUTPUT_MODE).getValue() || NAME_OUTPUT_MODES.STANDARD.value).trim();
+      }
+    } catch (e) {
+      Logger.log('銀行名・支店名出力モード取得エラー: ' + e.toString());
     }
     
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
       errors.push('振込データが入力されていません。');
-      return { isValid: false, errors };
+      return { isValid: false, errors, warnings };
     }
     
     // データ件数チェック
@@ -159,9 +178,12 @@ function validateTransferData() {
       // 空行スキップ
       if (isEmptyRow(row)) continue;
       
-      const rowErrors = validateTransferDataRow(row, rowNum);
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
+      const rowValidation = validateTransferDataRow(row, rowNum, nameOutputMode);
+      if (rowValidation.errors.length > 0) {
+        errors.push(...rowValidation.errors);
+      }
+      if (rowValidation.warnings.length > 0) {
+        warnings.push(...rowValidation.warnings);
       }
       
       // 重複チェック用キー作成
@@ -184,7 +206,7 @@ function validateTransferData() {
     errors.push('振込データの検証中にエラーが発生しました: ' + error.message);
   }
   
-  return { isValid: errors.length === 0, errors };
+  return { isValid: errors.length === 0, errors, warnings };
 }
 
 /**
@@ -266,10 +288,12 @@ function validateField(value, validation) {
  * 振込データ行の検証
  * @param {Array} row - 行データ
  * @param {number} rowNum - 行番号
- * @return {string[]} エラーメッセージの配列
+ * @param {string} nameOutputMode - 銀行名・支店名出力モード
+ * @return {Object} 検証結果 { errors: string[], warnings: string[] }
  */
-function validateTransferDataRow(row, rowNum) {
+function validateTransferDataRow(row, rowNum, nameOutputMode) {
   const errors = [];
+  const warnings = [];
   
   const validations = [
     { 
@@ -336,10 +360,37 @@ function validateTransferDataRow(row, rowNum) {
     }
   ];
   
+  // 銀行名・支店名出力モードが「名称出力」の場合の追加検証
+  if (nameOutputMode === NAME_OUTPUT_MODES.OUTPUT_NAME.value) {
+    validations.push(
+      { 
+        value: row[TRANSFER_DATA_COLUMNS.BANK_NAME - 1], 
+        label: '銀行名', 
+        maxLength: VALIDATION_RULES.BANK_NAME_MAX_LENGTH,
+        required: false,
+        type: 'zenginFormat',
+        isNameOutput: true
+      },
+      { 
+        value: row[TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1], 
+        label: '支店名', 
+        maxLength: VALIDATION_RULES.BRANCH_NAME_MAX_LENGTH,
+        required: false,
+        type: 'zenginFormat',
+        isNameOutput: true
+      }
+    );
+  }
+  
   for (const validation of validations) {
     const fieldErrors = validateField(validation.value, validation);
     if (fieldErrors.length > 0) {
       errors.push(...fieldErrors.map(error => `行${rowNum}: ${error}`));
+    }
+    
+    // 名称出力モードで銀行名・支店名が空白の場合の警告
+    if (validation.isNameOutput && !validation.value) {
+      warnings.push(`行${rowNum}: ${validation.label}が空白です。名称出力モードでは${validation.label}の入力を推奨します。`);
     }
   }
   
@@ -350,6 +401,17 @@ function validateTransferDataRow(row, rowNum) {
       errors.push(`行${rowNum}: 振込金額は正の数値で入力してください。`);
     } else if (amount > VALIDATION_RULES.MAX_AMOUNT) {
       errors.push(`行${rowNum}: 振込金額が上限(${VALIDATION_RULES.MAX_AMOUNT.toLocaleString()}円)を超えています。`);
+    }
+  }
+  
+  // 受取人名の姓名間スペースチェック（警告レベル）
+  const recipientName = row[TRANSFER_DATA_COLUMNS.RECIPIENT_NAME - 1];
+  if (recipientName && typeof recipientName === 'string') {
+    const trimmedName = recipientName.trim();
+    // 連続するスペースや前後のスペースを除いて、内部にスペースがある場合
+    if (trimmedName.includes(' ') && !trimmedName.includes('  ')) {
+      // 警告として扱う
+      warnings.push(`行${rowNum}: 受取人名に姓名間スペースが含まれています: "${trimmedName}" (全銀協仕様では姓名間スペースは不要とされています)`);
     }
   }
   
@@ -366,7 +428,7 @@ function validateTransferDataRow(row, rowNum) {
   }
   */
   
-  return errors;
+  return { errors, warnings };
 }
 
 /**

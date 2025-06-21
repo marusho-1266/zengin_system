@@ -102,6 +102,15 @@ function setupClientInfoValidation(sheet) {
     .build();
   sheet.getRange(CLIENT_INFO_CELLS.FILE_EXTENSION).setDataValidation(fileExtRule);
   
+  // 銀行名・支店名出力モードのプルダウン
+  const nameOutputModeValues = Object.values(NAME_OUTPUT_MODES).map(mode => mode.value);
+  const nameOutputModeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(nameOutputModeValues)
+    .setAllowInvalid(false)
+    .setHelpText('銀行名・支店名の出力方法を選択してください')
+    .build();
+  sheet.getRange(CLIENT_INFO_CELLS.NAME_OUTPUT_MODE).setDataValidation(nameOutputModeRule);
+  
   // 数値項目の入力検証と書式設定
   const numberRule = SpreadsheetApp.newDataValidation()
     .requireNumberGreaterThan(0)

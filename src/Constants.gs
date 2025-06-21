@@ -21,7 +21,8 @@ const CLIENT_INFO_CELLS = {
   ACCOUNT_TYPE: 'B8',
   ACCOUNT_NUMBER: 'B9',
   CATEGORY_CODE: 'B10',
-  FILE_EXTENSION: 'B11'
+  FILE_EXTENSION: 'B11',
+  NAME_OUTPUT_MODE: 'B12'
 };
 
 const CLIENT_INFO_LABELS = {
@@ -34,7 +35,8 @@ const CLIENT_INFO_LABELS = {
   ACCOUNT_TYPE: '預金種目',
   ACCOUNT_NUMBER: '口座番号',
   CATEGORY_CODE: '種別コード',
-  FILE_EXTENSION: '出力ファイル拡張子'
+  FILE_EXTENSION: '出力ファイル拡張子',
+  NAME_OUTPUT_MODE: '銀行名・支店名出力モード'
 };
 
 // ===== 振込データシート定数 =====
@@ -99,6 +101,11 @@ const CATEGORY_CODES = {
 };
 
 const FILE_EXTENSIONS = ['.dat', '.txt', '.fb'];
+
+const NAME_OUTPUT_MODES = {
+  STANDARD: { value: '標準（スペース埋め）', code: 'STANDARD' },
+  OUTPUT_NAME: { value: '名称出力', code: 'OUTPUT_NAME' }
+};
 
 const STATUS_OPTIONS = ['有効', '無効'];
 
