@@ -4,120 +4,38 @@
  */
 
 /**
- * 振込データCSVの取込処理（エラー行スキップ対応版）
+ * 振込データCSVの取込処理（メイン処理）
  * @param {string} csvData - CSVデータ（文字列）
- * @param {string} importMode - 取込モード（'overwrite' or 'append'）
+ * @param {string} importMode - 取込モード ('overwrite' または 'append')
  * @return {string} 処理結果メッセージ
  */
 function importTransferDataFromCsv(csvData, importMode) {
   try {
     logSystemActivity('importTransferDataFromCsv', `CSV取込処理開始 - モード: ${importMode}`, 'INFO');
     
-    // CSVデータの解析
-    const parsedData = parseCSV(csvData);
-    logSystemActivity('importTransferDataFromCsv', `CSVデータ解析完了 - ${parsedData.length}行`, 'INFO');
-    
-    if (parsedData.length === 0) {
-      logSystemActivity('importTransferDataFromCsv', 'CSVデータが空です', 'WARNING');
-      throw new Error('CSVデータが空です。');
+    // 1. CSVデータの解析と前処理
+    const parseResult = parseAndPrevalidateTransferData(csvData);
+    if (!parseResult.success) {
+      throw new Error(parseResult.error);
     }
     
-    // ヘッダー行を除く
-    const dataRows = parsedData.slice(1);
-    if (dataRows.length === 0) {
-      logSystemActivity('importTransferDataFromCsv', 'データ行がありません（ヘッダーのみ）', 'WARNING');
-      throw new Error('データ行がありません。ヘッダー行のみのCSVファイルです。');
+    const { dataRows, preValidationResult } = parseResult.data;
+    
+    // 2. エラー処理とユーザー確認
+    const shouldContinue = handleValidationErrors(preValidationResult);
+    if (!shouldContinue) {
+      logSystemActivity('importTransferDataFromCsv', 'ユーザーによる処理中断', 'INFO');
+      throw new Error('エラーが検出されたため処理を中断しました。');
     }
     
-    // 事前全体検証
-    const preValidationResult = preValidateTransferDataRows(dataRows);
+    // 3. シート準備と書き込み処理
+    const writeResult = processDataWriting(dataRows, importMode);
     
-    // エラーがある場合はユーザーに選択肢を提示
-    if (preValidationResult.errorRows.length > 0) {
-      const continueWithErrors = showErrorConfirmationDialog(preValidationResult);
-      if (!continueWithErrors) {
-        logSystemActivity('importTransferDataFromCsv', 'ユーザーによる処理中断', 'INFO');
-        throw new Error('エラーが検出されたため処理を中断しました。');
-      }
-    }
+    // 4. 自動補完処理
+    const autoCompleteResult = executeAutoCompletion();
     
-    // 振込データシートを取得
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = spreadsheet.getSheetByName(SHEET_NAMES.TRANSFER_DATA);
-    
-    if (!sheet) {
-      logSystemActivity('importTransferDataFromCsv', '振込データシートが見つかりません', 'ERROR');
-      throw new Error('振込データシートが見つかりません。');
-    }
-    
-    logSystemActivity('importTransferDataFromCsv', `振込データシート名: ${sheet.getName()}`, 'INFO');
-    
-    let startRow = 2; // ヘッダー行の次から開始
-    
-    if (importMode === 'overwrite') {
-      // 既存データをクリア
-      const lastRow = sheet.getLastRow();
-      logSystemActivity('importTransferDataFromCsv', `最終行: ${lastRow}`, 'INFO');
-      
-      if (lastRow > 1) {
-        sheet.getRange(2, 1, lastRow - 1, Object.keys(TRANSFER_DATA_COLUMNS).length).clear();
-        logSystemActivity('importTransferDataFromCsv', `既存データクリア完了 - ${lastRow - 1}行削除`, 'INFO');
-      }
-    } else if (importMode === 'append') {
-      // 追記モードの場合は最後の行の次から開始
-      startRow = sheet.getLastRow() + 1;
-      logSystemActivity('importTransferDataFromCsv', `追記モード - 開始行: ${startRow}`, 'INFO');
-    }
-    
-    // データの書き込み（エラー行スキップ対応）
-    const processedData = [];
-    let successCount = 0;
-    let skipCount = 0;
-    
-    for (let i = 0; i < dataRows.length; i++) {
-      const rowNum = i + 2; // ヘッダー行を考慮
-      try {
-        // 行の検証
-        const rowErrors = validateCsvRow(dataRows[i], rowNum);
-        if (rowErrors.length > 0) {
-          skipCount++;
-          logSystemActivity('importTransferDataFromCsv', `行${rowNum}をスキップ: ${rowErrors[0]}`, 'WARNING');
-          continue;
-        }
-        
-        // 正常行の処理
-        const processedRow = processTransferDataRow(dataRows[i]);
-        processedData.push(processedRow);
-        successCount++;
-      } catch (error) {
-        skipCount++;
-        logSystemActivity('importTransferDataFromCsv', `行${rowNum}処理エラーによりスキップ: ${error.message}`, 'WARNING');
-      }
-    }
-    
-    // 正常データの書き込み
-    if (processedData.length > 0) {
-      sheet.getRange(startRow, 1, processedData.length, processedData[0].length).setValues(processedData);
-      logSystemActivity('importTransferDataFromCsv', `データ書き込み完了 - 成功: ${successCount}件, スキップ: ${skipCount}件`, 'INFO');
-    }
-    
-    // 自動補完実行（オプション）
-    try {
-      logSystemActivity('importTransferDataFromCsv', '自動補完処理開始', 'INFO');
-      const autoCompleteResult = bulkAutoComplete();
-      logSystemActivity('importTransferDataFromCsv', `自動補完完了 - 銀行名: ${autoCompleteResult.bankNameCompletions}件, 支店名: ${autoCompleteResult.branchNameCompletions}件`, 'INFO');
-    } catch (autoCompleteError) {
-      logSystemActivity('importTransferDataFromCsv', `自動補完エラー: ${autoCompleteError.message}`, 'ERROR');
-      Logger.log('自動補完エラー: ' + autoCompleteError.toString());
-      // 自動補完エラーは無視して継続
-    }
-    
-    const resultMessage = `CSV取込完了\n` +
-                         `モード: ${importMode === 'overwrite' ? '上書き' : '追記'}\n` +
-                         `総件数: ${dataRows.length}件\n` +
-                         `成功: ${successCount}件\n` +
-                         `スキップ: ${skipCount}件\n` +
-                         `開始行: ${startRow}行`;
+    // 5. 結果レポート生成
+    const resultMessage = generateImportReport(importMode, dataRows.length, writeResult, autoCompleteResult);
     
     logSystemActivity('importTransferDataFromCsv', resultMessage.replace(/\n/g, ', '), 'INFO');
     Logger.log(resultMessage);
@@ -128,6 +46,207 @@ function importTransferDataFromCsv(csvData, importMode) {
     Logger.log('CSV取込エラー: ' + error.toString());
     throw error;
   }
+}
+
+/**
+ * CSVデータの解析と事前検証
+ * @param {string} csvData - CSVデータ
+ * @return {Object} 解析結果
+ */
+function parseAndPrevalidateTransferData(csvData) {
+  try {
+    // CSVデータの解析
+    const parsedData = parseCSV(csvData);
+    logSystemActivity('importTransferDataFromCsv', `CSVデータ解析完了 - ${parsedData.length}行`, 'INFO');
+    
+    if (parsedData.length === 0) {
+      logSystemActivity('importTransferDataFromCsv', 'CSVデータが空です', 'WARNING');
+      return { success: false, error: 'CSVデータが空です。' };
+    }
+    
+    // ヘッダー行を除く
+    const dataRows = parsedData.slice(1);
+    if (dataRows.length === 0) {
+      logSystemActivity('importTransferDataFromCsv', 'データ行がありません（ヘッダーのみ）', 'WARNING');
+      return { success: false, error: 'データ行がありません。ヘッダー行のみのCSVファイルです。' };
+    }
+    
+    // 事前全体検証
+    const preValidationResult = preValidateTransferDataRows(dataRows);
+    
+    return {
+      success: true,
+      data: { dataRows, preValidationResult }
+    };
+    
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 検証エラーの処理とユーザー確認
+ * @param {Object} preValidationResult - 事前検証結果
+ * @return {boolean} 処理を続行するかどうか
+ */
+function handleValidationErrors(preValidationResult) {
+  if (preValidationResult.errorRows.length > 0) {
+    const continueWithErrors = showErrorConfirmationDialog(preValidationResult);
+    return continueWithErrors;
+  }
+  return true;
+}
+
+/**
+ * データ書き込み処理
+ * @param {Array[]} dataRows - データ行
+ * @param {string} importMode - 取込モード
+ * @return {Object} 書き込み結果
+ */
+function processDataWriting(dataRows, importMode) {
+  // 振込データシートを取得
+  const sheet = getTransferDataSheet();
+  
+  // 書き込み開始行の決定
+  const startRow = determineStartRow(sheet, importMode);
+  
+  // データの処理と書き込み
+  const processResult = processAndWriteData(dataRows, sheet, startRow);
+  
+  return {
+    startRow,
+    successCount: processResult.successCount,
+    skipCount: processResult.skipCount
+  };
+}
+
+/**
+ * 振込データシートの取得
+ * @return {Sheet} 振込データシート
+ */
+function getTransferDataSheet() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(SHEET_NAMES.TRANSFER_DATA);
+  
+  if (!sheet) {
+    logSystemActivity('importTransferDataFromCsv', '振込データシートが見つかりません', 'ERROR');
+    throw new Error('振込データシートが見つかりません。');
+  }
+  
+  logSystemActivity('importTransferDataFromCsv', `振込データシート名: ${sheet.getName()}`, 'INFO');
+  return sheet;
+}
+
+/**
+ * 書き込み開始行の決定
+ * @param {Sheet} sheet - 対象シート
+ * @param {string} importMode - 取込モード
+ * @return {number} 開始行番号
+ */
+function determineStartRow(sheet, importMode) {
+  let startRow = 2; // ヘッダー行の次から開始
+  
+  if (importMode === 'overwrite') {
+    // 既存データをクリア
+    const lastRow = sheet.getLastRow();
+    logSystemActivity('importTransferDataFromCsv', `最終行: ${lastRow}`, 'INFO');
+    
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, Object.keys(TRANSFER_DATA_COLUMNS).length).clear();
+      logSystemActivity('importTransferDataFromCsv', `既存データクリア完了 - ${lastRow - 1}行削除`, 'INFO');
+    }
+  } else if (importMode === 'append') {
+    // 追記モードの場合は最後の行の次から開始
+    startRow = sheet.getLastRow() + 1;
+    logSystemActivity('importTransferDataFromCsv', `追記モード - 開始行: ${startRow}`, 'INFO');
+  }
+  
+  return startRow;
+}
+
+/**
+ * データの処理と書き込み
+ * @param {Array[]} dataRows - データ行
+ * @param {Sheet} sheet - 対象シート
+ * @param {number} startRow - 開始行
+ * @return {Object} 処理結果
+ */
+function processAndWriteData(dataRows, sheet, startRow) {
+  const processedData = [];
+  let successCount = 0;
+  let skipCount = 0;
+  
+  for (let i = 0; i < dataRows.length; i++) {
+    const rowNum = i + 2; // ヘッダー行を考慮
+    try {
+      // 行の検証
+      const rowErrors = validateCsvRow(dataRows[i], rowNum);
+      if (rowErrors.length > 0) {
+        skipCount++;
+        logSystemActivity('importTransferDataFromCsv', `行${rowNum}をスキップ: ${rowErrors[0]}`, 'WARNING');
+        continue;
+      }
+      
+      // 正常行の処理
+      const processedRow = processTransferDataRow(dataRows[i]);
+      processedData.push(processedRow);
+      successCount++;
+    } catch (error) {
+      skipCount++;
+      logSystemActivity('importTransferDataFromCsv', `行${rowNum}処理エラーによりスキップ: ${error.message}`, 'WARNING');
+    }
+  }
+  
+  // 正常データの書き込み
+  if (processedData.length > 0) {
+    sheet.getRange(startRow, 1, processedData.length, processedData[0].length).setValues(processedData);
+    logSystemActivity('importTransferDataFromCsv', `データ書き込み完了 - 成功: ${successCount}件, スキップ: ${skipCount}件`, 'INFO');
+  }
+  
+  return { successCount, skipCount };
+}
+
+/**
+ * 自動補完処理の実行
+ * @return {Object} 自動補完結果
+ */
+function executeAutoCompletion() {
+  try {
+    logSystemActivity('importTransferDataFromCsv', '自動補完処理開始', 'INFO');
+    const autoCompleteResult = bulkAutoComplete();
+    logSystemActivity('importTransferDataFromCsv', `自動補完完了 - 銀行名: ${autoCompleteResult.bankNameCompletions}件, 支店名: ${autoCompleteResult.branchNameCompletions}件`, 'INFO');
+    return autoCompleteResult;
+  } catch (autoCompleteError) {
+    logSystemActivity('importTransferDataFromCsv', `自動補完エラー: ${autoCompleteError.message}`, 'ERROR');
+    Logger.log('自動補完エラー: ' + autoCompleteError.toString());
+    // 自動補完エラーは無視して継続
+    return {
+      bankNameCompletions: 0,
+      branchNameCompletions: 0,
+      failures: 0,
+      error: autoCompleteError.message
+    };
+  }
+}
+
+/**
+ * 取込結果レポートの生成
+ * @param {string} importMode - 取込モード
+ * @param {number} totalRows - 総行数
+ * @param {Object} writeResult - 書き込み結果
+ * @param {Object} autoCompleteResult - 自動補完結果
+ * @return {string} 結果メッセージ
+ */
+function generateImportReport(importMode, totalRows, writeResult, autoCompleteResult) {
+  const resultMessage = `CSV取込完了\n` +
+                       `モード: ${importMode === 'overwrite' ? '上書き' : '追記'}\n` +
+                       `総件数: ${totalRows}件\n` +
+                       `成功: ${writeResult.successCount}件\n` +
+                       `スキップ: ${writeResult.skipCount}件\n` +
+                       `開始行: ${writeResult.startRow}行\n` +
+                       `自動補完: 銀行名${autoCompleteResult.bankNameCompletions}件, 支店名${autoCompleteResult.branchNameCompletions}件`;
+  
+  return resultMessage;
 }
 
 /**
@@ -192,20 +311,41 @@ function importBankMasterFromCsv(csvData, duplicateCheck = true) {
       
       // 新しいデータの処理
       const processedRows = [];
+      const updatedRows = new Map(); // 更新データを一時保存
       
       for (const csvRow of dataRows) {
         const processedRow = processBankMasterDataRow(csvRow);
         const key = `${processedRow[BANK_MASTER_COLUMNS.BANK_CODE - 1]}-${processedRow[BANK_MASTER_COLUMNS.BRANCH_CODE - 1]}`;
         
         if (existingMap.has(key)) {
-          // 既存データの更新
+          // 既存データの更新（メモリ上で管理）
           const existing = existingMap.get(key);
-          sheet.getRange(existing.index, 1, 1, processedRow.length).setValues([processedRow]);
+          updatedRows.set(existing.index, processedRow);
           updateCount++;
         } else {
           // 新規データとして追加
           processedRows.push(processedRow);
           newDataCount++;
+        }
+      }
+      
+      // 既存データの更新をバッチ処理
+      if (updatedRows.size > 0) {
+        // 既存データ全体を取得
+        const lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          const allData = sheet.getRange(2, 1, lastRow - 1, Object.keys(BANK_MASTER_COLUMNS).length).getValues();
+          
+          // 更新データを反映
+          updatedRows.forEach((row, rowIndex) => {
+            const arrayIndex = rowIndex - 2; // 配列インデックスに変換
+            if (arrayIndex >= 0 && arrayIndex < allData.length) {
+              allData[arrayIndex] = row;
+            }
+          });
+          
+          // 一括更新
+          sheet.getRange(2, 1, allData.length, allData[0].length).setValues(allData);
         }
       }
       
@@ -372,7 +512,7 @@ function validateCsvData(dataRows) {
     if (amount && (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)) {
       errors.push(`行${rowNum}: 振込金額は正の数値で入力してください。`);
     }
-          if (recipientName && !/^[A-Z0-9ｱ-ﾝﾞﾟｧ-ｯ ・ー().\-/]+$/.test(recipientName)) {
+    if (recipientName && !/^[A-Z0-9ｱ-ﾝﾞﾟｧ-ｯ ・ー().\-/]+$/.test(recipientName)) {
       errors.push(`行${rowNum}: 受取人名は全銀協フォーマット対応文字（半角カナ・英数字・記号、カンマ除く）で入力してください。`);
     }
     
@@ -460,9 +600,9 @@ function processTransferDataRow(csvRow) {
   result[TRANSFER_DATA_COLUMNS.ACCOUNT_NUMBER - 1] = (csvRow[3] || '').toString().trim(); // 口座番号
   result[TRANSFER_DATA_COLUMNS.RECIPIENT_NAME - 1] = (csvRow[4] || '').toString().trim(); // 受取人名
   
-  // 振込金額は数値に変換
+  // 振込金額は整数に変換（全銀協フォーマットは整数のみ対応）
   const amount = (csvRow[5] || '').toString().trim();
-  result[TRANSFER_DATA_COLUMNS.AMOUNT - 1] = amount ? parseFloat(amount) : '';
+  result[TRANSFER_DATA_COLUMNS.AMOUNT - 1] = amount ? Math.floor(parseFloat(amount)) : '';
   
   // オプション項目
   result[TRANSFER_DATA_COLUMNS.CUSTOMER_CODE - 1] = (csvRow[6] || '').toString().trim(); // 顧客コード
@@ -525,12 +665,6 @@ function debugCsvData(csvData) {
     Logger.log('デバッグエラー: ' + error.toString());
   }
 }
-
-
-
-
-
-
 
 /**
  * 事前検証：全行をチェックしてエラー行を特定

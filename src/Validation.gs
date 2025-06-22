@@ -194,7 +194,7 @@ function validateTransferData() {
       if (bankCode && branchCode && accountNumber) {
         const duplicateKey = `${bankCode}-${branchCode}-${accountNumber}`;
         if (duplicateCheckMap.has(duplicateKey)) {
-          errors.push(`行${rowNum}: 重複する口座が存在します (初回出現: 行${duplicateCheckMap.get(duplicateKey)})`);
+          errors.push(`行${rowNum}: 重複する口座が存在します (銀行:${maskBankCode(bankCode)}, 支店:${maskBankCode(branchCode)}, 口座:${maskAccountNumber(accountNumber)}, 初回出現: 行${duplicateCheckMap.get(duplicateKey)})`);
         } else {
           duplicateCheckMap.set(duplicateKey, rowNum);
         }
@@ -411,7 +411,7 @@ function validateTransferDataRow(row, rowNum, nameOutputMode) {
     // 連続するスペースや前後のスペースを除いて、内部にスペースがある場合
     if (trimmedName.includes(' ') && !trimmedName.includes('  ')) {
       // 警告として扱う
-      warnings.push(`行${rowNum}: 受取人名に姓名間スペースが含まれています: "${trimmedName}" (全銀協仕様では姓名間スペースは不要とされています)`);
+      warnings.push(`行${rowNum}: 受取人名に姓名間スペースが含まれています: "${maskRecipientName(trimmedName)}" (全銀協仕様では姓名間スペースは不要とされています)`);
     }
   }
   
@@ -449,7 +449,7 @@ function validateBankMasterExists(bankCode, branchCode) {
     if (!exists) {
       return { 
         isValid: false, 
-        errors: [`金融機関コード(${bankCode}-${branchCode})が金融機関マスタに存在しないか、無効です。`] 
+        errors: [`金融機関コード(${maskBankCode(bankCode)}-${maskBankCode(branchCode)})が金融機関マスタに存在しないか、無効です。`] 
       };
     }
     
@@ -463,51 +463,6 @@ function validateBankMasterExists(bankCode, branchCode) {
   }
 }
 
-/**
- * 行が空かどうかチェック
- * @param {Array} row - 行データ
- * @return {boolean} 空行かどうか
- */
-function isEmptyRow(row) {
-  return row.every(cell => !cell || String(cell).trim() === '');
-}
 
-/**
- * 半角カナ文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidKana(str) {
-  // 半角カナ文字とスペースのみ許可
-  return /^[ｱ-ﾝ ]+$/.test(str);
-}
 
-/**
- * 全銀協フォーマット対応文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidZenginFormat(str) {
-  // 全銀協フォーマット対応文字: 半角カナ、英数字、記号（カンマ除く）、スペース
-  // 使用可能文字: A-Z, 0-9, ｱ-ﾝ, 濁点, 半濁点, 長音, 中点, 各種記号（カンマ除く）
-  const zenginFormatRegex = /^[A-Z0-9ｱ-ﾝﾞﾟｧ-ｯ ・ー().\-/]+$/;
-  return zenginFormatRegex.test(str);
-}
-
-/**
- * 数値文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidNumber(str) {
-  return /^\d+$/.test(str);
-}
-
-/**
- * 英数字文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidAlphanumeric(str) {
-  return /^[A-Za-z0-9]+$/.test(str);
-} 
+ 

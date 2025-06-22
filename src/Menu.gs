@@ -7,7 +7,20 @@
  * スプレッドシート開く時に実行される関数
  */
 function onOpen() {
-  createCustomMenu();
+  try {
+    // システム初期化（ZenginSystemが存在する場合のみ）
+    if (typeof ZenginSystem !== 'undefined') {
+      initializeZenginSystem();
+    } else {
+      Logger.log('ZenginSystemが未定義のため、基本初期化をスキップします');
+    }
+    // カスタムメニュー作成
+    createCustomMenu();
+  } catch (error) {
+    Logger.log('onOpen初期化エラー: ' + error.toString());
+    // エラーが発生してもメニューは作成する
+    createCustomMenu();
+  }
 }
 
 /**

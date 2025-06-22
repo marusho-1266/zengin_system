@@ -51,6 +51,18 @@ function createZenginFormatFile() {
     const encodingCheck = validateShiftJISCompatibility(fileContent);
     if (!encodingCheck.isValidSJIS) {
       Logger.log('警告: ' + encodingCheck.message);
+      
+      // 詳細な警告をユーザーに表示
+      const detailWarning = `文字エンコーディングの問題が検出されました。\n\n` +
+        encodingCheck.message + `\n\n` +
+        `これらの文字はShift_JISで正しく表現できないため、` +
+        `金融機関での処理時にエラーとなる可能性があります。\n\n` +
+        `推奨対応:\n` +
+        `1. 問題のある文字を半角カナまたは英数字に置換してください\n` +
+        `2. 受取人名や銀行名に特殊文字が含まれていないか確認してください\n` +
+        `3. それでも解決しない場合は、システム管理者にご相談ください`;
+      
+      SpreadsheetApp.getUi().alert('文字エンコーディング警告', detailWarning, SpreadsheetApp.getUi().ButtonSet.OK);
     }
     
     // ファイル名の生成
@@ -175,7 +187,7 @@ function getTransferDataForFormat() {
           accountType: extractSelectValue(row[TRANSFER_DATA_COLUMNS.ACCOUNT_TYPE - 1]) || '1',
           accountNumber: normalizeNumericCode(accountNumber, 7),
           recipientName,
-          amount: Number(amount),
+          amount: Math.floor(Number(amount)),
           customerCode: String(row[TRANSFER_DATA_COLUMNS.CUSTOMER_CODE - 1] || '').trim(),
           identification: String(row[TRANSFER_DATA_COLUMNS.IDENTIFICATION - 1] || '').trim(),
           ediInfo: String(row[TRANSFER_DATA_COLUMNS.EDI_INFO - 1] || '').trim()
@@ -400,35 +412,7 @@ function generateFileName(clientInfo) {
   return `FB${clientInfo.clientCode}_${dateStr}_${timeStr}${extension}`;
 }
 
-/**
- * 左側を指定文字でパディング
- * @param {string} str - 対象文字列
- * @param {number} length - 目標長
- * @param {string} padChar - パディング文字
- * @return {string} パディング後の文字列
- */
-function padLeft(str, length, padChar = ' ') {
-  str = String(str);
-  while (str.length < length) {
-    str = padChar + str;
-  }
-  return str.substring(0, length); // 長すぎる場合は切り詰め
-}
 
-/**
- * 右側を指定文字でパディング
- * @param {string} str - 対象文字列
- * @param {number} length - 目標長
- * @param {string} padChar - パディング文字
- * @return {string} パディング後の文字列
- */
-function padRight(str, length, padChar = ' ') {
-  str = String(str);
-  while (str.length < length) {
-    str = str + padChar;
-  }
-  return str.substring(0, length); // 長すぎる場合は切り詰め
-}
 
 /**
  * 全角カナを半角カナに変換
@@ -469,40 +453,9 @@ function toHalfwidthKana(str) {
   return result;
 }
 
-/**
- * 数値コードの正規化（０埋め処理）
- * @param {any} value - 元の値
- * @param {number} length - 目標桁数
- * @return {string} ０埋めされた文字列
- */
-function normalizeNumericCode(value, length) {
-  const stringValue = String(value || '').trim();
-  if (!stringValue) return '';
-  
-  // 数値の場合のみ０埋め処理を行う
-  if (/^\d+$/.test(stringValue)) {
-    return stringValue.padStart(length, '0');
-  }
-  
-  return stringValue;
-}
 
-/**
- * プルダウン選択値の抽出（「1:普通」→「1」）
- * @param {any} value - 元の値
- * @return {string} 抽出された値
- */
-function extractSelectValue(value) {
-  const stringValue = String(value || '').trim();
-  if (!stringValue) return '';
-  
-  // 「1:普通」形式の場合、「:」の前の値を抽出
-  if (stringValue.includes(':')) {
-    return stringValue.split(':')[0];
-  }
-  
-  return stringValue;
-}
+
+
 
 /**
  * 全銀協フォーマットファイルのダウンロード
@@ -539,20 +492,31 @@ function createShiftJISBlob(content, fileName) {
     // バイト配列からBlobを生成（MIMEタイプは指定しない）
     const blob = Utilities.newBlob(shiftJISBytes, 'application/octet-stream', fileName);
     
-    Logger.log(`Shift_JISファイル生成: ${fileName}, サイズ: ${shiftJISBytes.length}バイト`);
+    Logger.log(`Shift_JISファイル生成成功: ${fileName}, サイズ: ${shiftJISBytes.length}バイト`);
     return blob;
     
   } catch (error) {
     Logger.log('Shift_JISBlob生成エラー: ' + error.toString());
     
-    // フォールバック1: charset指定でのBlob生成
-    try {
-      return Utilities.newBlob(content, 'text/plain; charset=shift_jis', fileName);
-    } catch (fallbackError) {
-      // フォールバック2: 通常のBlob生成
-      Logger.log('フォールバック実行: ' + fallbackError.toString());
-      return Utilities.newBlob(content, 'text/plain', fileName);
-    }
+    // フォールバック: UTF-8でのBlob生成（警告付き）
+    const warningMessage = `
+【警告】Shift_JISエンコーディングに失敗しました。
+UTF-8形式でファイルを生成します。
+金融機関によってはこのファイルが受け付けられない可能性があります。
+
+推奨対応:
+1. 受取人名や銀行名に特殊文字が含まれていないか確認してください
+2. 全角文字を半角カナに変換してください
+3. 記号は全銀協フォーマット対応文字のみを使用してください
+
+エラー詳細: ${error.message}
+`;
+    
+    SpreadsheetApp.getUi().alert('文字エンコーディング警告', warningMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+    
+    // UTF-8でのBlob生成
+    Logger.log('フォールバック実行: UTF-8形式でファイル生成');
+    return Utilities.newBlob(content, 'text/plain; charset=utf-8', fileName);
   }
 }
 
@@ -602,22 +566,68 @@ function convertToShiftJISBytes(str) {
  * @return {number[]|null} Shift_JISバイト配列、または null
  */
 function getShiftJISMapping(char) {
-  // よく使用される文字のShift_JISマッピング
+  // 全銀協フォーマットで使用される文字のShift_JISマッピング
   const mappings = {
-    // 数字関連
+    // === 半角カナ文字（濁点・半濁点を含む） ===
+    // 基本カナ
+    'ｱ': [0xB1], 'ｲ': [0xB2], 'ｳ': [0xB3], 'ｴ': [0xB4], 'ｵ': [0xB5],
+    'ｶ': [0xB6], 'ｷ': [0xB7], 'ｸ': [0xB8], 'ｹ': [0xB9], 'ｺ': [0xBA],
+    'ｻ': [0xBB], 'ｼ': [0xBC], 'ｽ': [0xBD], 'ｾ': [0xBE], 'ｿ': [0xBF],
+    'ﾀ': [0xC0], 'ﾁ': [0xC1], 'ﾂ': [0xC2], 'ﾃ': [0xC3], 'ﾄ': [0xC4],
+    'ﾅ': [0xC5], 'ﾆ': [0xC6], 'ﾇ': [0xC7], 'ﾈ': [0xC8], 'ﾉ': [0xC9],
+    'ﾊ': [0xCA], 'ﾋ': [0xCB], 'ﾌ': [0xCC], 'ﾍ': [0xCD], 'ﾎ': [0xCE],
+    'ﾏ': [0xCF], 'ﾐ': [0xD0], 'ﾑ': [0xD1], 'ﾒ': [0xD2], 'ﾓ': [0xD3],
+    'ﾔ': [0xD4], 'ﾕ': [0xD5], 'ﾖ': [0xD6],
+    'ﾗ': [0xD7], 'ﾘ': [0xD8], 'ﾙ': [0xD9], 'ﾚ': [0xDA], 'ﾛ': [0xDB],
+    'ﾜ': [0xDC], 'ｦ': [0xA6], 'ﾝ': [0xDD],
+    
+    // 小文字
+    'ｧ': [0xA7], 'ｨ': [0xA8], 'ｩ': [0xA9], 'ｪ': [0xAA], 'ｫ': [0xAB],
+    'ｬ': [0xAC], 'ｭ': [0xAD], 'ｮ': [0xAE], 'ｯ': [0xAF],
+    
+    // 濁点・半濁点（単独）
+    'ﾞ': [0xDE], 'ﾟ': [0xDF],
+    
+    // 濁音（組み合わせ）
+    'ｶﾞ': [0xB6, 0xDE], 'ｷﾞ': [0xB7, 0xDE], 'ｸﾞ': [0xB8, 0xDE], 'ｹﾞ': [0xB9, 0xDE], 'ｺﾞ': [0xBA, 0xDE],
+    'ｻﾞ': [0xBB, 0xDE], 'ｼﾞ': [0xBC, 0xDE], 'ｽﾞ': [0xBD, 0xDE], 'ｾﾞ': [0xBE, 0xDE], 'ｿﾞ': [0xBF, 0xDE],
+    'ﾀﾞ': [0xC0, 0xDE], 'ﾁﾞ': [0xC1, 0xDE], 'ﾂﾞ': [0xC2, 0xDE], 'ﾃﾞ': [0xC3, 0xDE], 'ﾄﾞ': [0xC4, 0xDE],
+    'ﾊﾞ': [0xCA, 0xDE], 'ﾋﾞ': [0xCB, 0xDE], 'ﾌﾞ': [0xCC, 0xDE], 'ﾍﾞ': [0xCD, 0xDE], 'ﾎﾞ': [0xCE, 0xDE],
+    
+    // 半濁音（組み合わせ）
+    'ﾊﾟ': [0xCA, 0xDF], 'ﾋﾟ': [0xCB, 0xDF], 'ﾌﾟ': [0xCC, 0xDF], 'ﾍﾟ': [0xCD, 0xDF], 'ﾎﾟ': [0xCE, 0xDF],
+    
+    // === 記号類 ===
+    'ｰ': [0xB0],    // 長音
+    '･': [0xA5],    // 中点
+    '｡': [0xA1],    // 句点
+    '､': [0xA4],    // 読点
+    '｢': [0xA2],    // 開き鍵括弧
+    '｣': [0xA3],    // 閉じ鍵括弧
+    
+    // === 全角文字のマッピング（必要な場合） ===
+    // 全角数字
     '０': [0x82, 0x4F], '１': [0x82, 0x50], '２': [0x82, 0x51], '３': [0x82, 0x52], '４': [0x82, 0x53],
     '５': [0x82, 0x54], '６': [0x82, 0x55], '７': [0x82, 0x56], '８': [0x82, 0x57], '９': [0x82, 0x58],
     
-    // アルファベット大文字
+    // 全角アルファベット大文字
     'Ａ': [0x82, 0x60], 'Ｂ': [0x82, 0x61], 'Ｃ': [0x82, 0x62], 'Ｄ': [0x82, 0x63], 'Ｅ': [0x82, 0x64],
     'Ｆ': [0x82, 0x65], 'Ｇ': [0x82, 0x66], 'Ｈ': [0x82, 0x67], 'Ｉ': [0x82, 0x68], 'Ｊ': [0x82, 0x69],
     'Ｋ': [0x82, 0x6A], 'Ｌ': [0x82, 0x6B], 'Ｍ': [0x82, 0x6C], 'Ｎ': [0x82, 0x6D], 'Ｏ': [0x82, 0x6E],
     'Ｐ': [0x82, 0x6F], 'Ｑ': [0x82, 0x70], 'Ｒ': [0x82, 0x71], 'Ｓ': [0x82, 0x72], 'Ｔ': [0x82, 0x73],
-    'Ｕ': [0x82, 0x74], 'Ｖ': [0x82, 0x75], 'Ｗ': [0x82, 0x76], 'Ｘ': [0x82, 0x77], 'Ｙ': [0x82, 0x78], 'Ｚ': [0x82, 0x79],
+    'Ｕ': [0x82, 0x74], 'Ｖ': [0x82, 0x75], 'Ｗ': [0x82, 0x76], 'Ｘ': [0x82, 0x77], 'Ｙ': [0x82, 0x78], 
+    'Ｚ': [0x82, 0x79],
     
-    // 記号
+    // 全角記号
     '（': [0x81, 0x69], '）': [0x81, 0x6A], '－': [0x81, 0x5C], '＿': [0x81, 0x51],
-    '．': [0x81, 0x44], '，': [0x81, 0x43], '：': [0x81, 0x46], '；': [0x81, 0x47]
+    '．': [0x81, 0x44], '，': [0x81, 0x43], '：': [0x81, 0x46], '；': [0x81, 0x47],
+    '／': [0x81, 0x5E], '＼': [0x81, 0x5F], '＠': [0x81, 0x97], '＃': [0x81, 0x94],
+    '＄': [0x81, 0x90], '％': [0x81, 0x93], '＆': [0x81, 0x95], '＊': [0x81, 0x96],
+    '＋': [0x81, 0x7B], '＝': [0x81, 0x81], '＜': [0x81, 0x83], '＞': [0x81, 0x84],
+    '？': [0x81, 0x48], '！': [0x81, 0x49], '～': [0x81, 0x60], '￥': [0x81, 0x8F],
+    
+    // 全角スペース
+    '　': [0x81, 0x40]
   };
   
   return mappings[char] || null;
@@ -626,64 +636,69 @@ function getShiftJISMapping(char) {
 /**
  * 文字エンコーディングの検証
  * @param {string} content - 検証対象文字列
- * @return {Object} { isValidSJIS: boolean, message: string }
+ * @return {Object} { isValidSJIS: boolean, message: string, problematicChars: Array }
  */
 function validateShiftJISCompatibility(content) {
   try {
     // Shift_JISで表現できない文字の検出
     const problematicChars = [];
+    const charLocations = [];
     
-    for (let i = 0; i < content.length; i++) {
-      const char = content[i];
-      const code = char.charCodeAt(0);
-      
-      // 基本的なShift_JIS範囲外の文字をチェック
-      if (code > 0xFF7F && !isShiftJISCompatible(char)) {
-        problematicChars.push(`${char}(U+${code.toString(16).toUpperCase()})`);
+    const lines = content.split(/\r?\n/);
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+      const line = lines[lineNum];
+      for (let charPos = 0; charPos < line.length; charPos++) {
+        const char = line[charPos];
+        const code = char.charCodeAt(0);
+        
+        // ASCII範囲はOK
+        if (code <= 0x7F) continue;
+        
+        // 半角カナ範囲はOK
+        if (code >= 0xFF61 && code <= 0xFF9F) continue;
+        
+        // Shift_JISマッピングが存在するかチェック
+        const shiftJISMapping = getShiftJISMapping(char);
+        if (!shiftJISMapping) {
+          problematicChars.push({
+            char: char,
+            code: code,
+            line: lineNum + 1,
+            position: charPos + 1,
+            hex: 'U+' + code.toString(16).toUpperCase().padStart(4, '0')
+          });
+        }
       }
     }
     
     if (problematicChars.length > 0) {
+      const detailMessage = problematicChars.slice(0, 5).map(info => 
+        `'${info.char}' (${info.hex}) at 行${info.line}:列${info.position}`
+      ).join(', ');
+      
       return {
         isValidSJIS: false,
-        message: `Shift_JIS非対応文字が含まれています: ${problematicChars.slice(0, 10).join(', ')}${problematicChars.length > 10 ? '...' : ''}`
+        message: `Shift_JIS非対応文字が${problematicChars.length}個見つかりました: ${detailMessage}${problematicChars.length > 5 ? '...' : ''}`,
+        problematicChars: problematicChars
       };
     }
     
     return {
       isValidSJIS: true,
-      message: 'Shift_JIS互換性OK'
+      message: 'Shift_JIS互換性OK',
+      problematicChars: []
     };
     
   } catch (error) {
     return {
       isValidSJIS: false,
-      message: '文字エンコーディング検証エラー: ' + error.message
+      message: '文字エンコーディング検証エラー: ' + error.message,
+      problematicChars: []
     };
   }
 }
 
-/**
- * 文字がShift_JIS互換かチェック
- * @param {string} char - 文字
- * @return {boolean} Shift_JIS互換性
- */
-function isShiftJISCompatible(char) {
-  const code = char.charCodeAt(0);
-  
-  // ASCII範囲
-  if (code <= 0x7F) return true;
-  
-  // 半角カナ範囲
-  if (code >= 0xFF61 && code <= 0xFF9F) return true;
-  
-  // 一般的な日本語文字（簡易チェック）
-  if (code >= 0x3040 && code <= 0x309F) return true; // ひらがな
-  if (code >= 0x30A0 && code <= 0x30FF) return true; // カタカナ
-  if (code >= 0x4E00 && code <= 0x9FAF) return true; // 漢字（基本範囲）
-  
-  return false;
-}
+
 
 
 
