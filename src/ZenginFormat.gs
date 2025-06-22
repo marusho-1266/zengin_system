@@ -412,35 +412,7 @@ function generateFileName(clientInfo) {
   return `FB${clientInfo.clientCode}_${dateStr}_${timeStr}${extension}`;
 }
 
-/**
- * 左側を指定文字でパディング
- * @param {string} str - 対象文字列
- * @param {number} length - 目標長
- * @param {string} padChar - パディング文字
- * @return {string} パディング後の文字列
- */
-function padLeft(str, length, padChar = ' ') {
-  str = String(str);
-  while (str.length < length) {
-    str = padChar + str;
-  }
-  return str.substring(0, length); // 長すぎる場合は切り詰め
-}
 
-/**
- * 右側を指定文字でパディング
- * @param {string} str - 対象文字列
- * @param {number} length - 目標長
- * @param {string} padChar - パディング文字
- * @return {string} パディング後の文字列
- */
-function padRight(str, length, padChar = ' ') {
-  str = String(str);
-  while (str.length < length) {
-    str = str + padChar;
-  }
-  return str.substring(0, length); // 長すぎる場合は切り詰め
-}
 
 /**
  * 全角カナを半角カナに変換
@@ -481,40 +453,9 @@ function toHalfwidthKana(str) {
   return result;
 }
 
-/**
- * 数値コードの正規化（０埋め処理）
- * @param {any} value - 元の値
- * @param {number} length - 目標桁数
- * @return {string} ０埋めされた文字列
- */
-function normalizeNumericCode(value, length) {
-  const stringValue = String(value || '').trim();
-  if (!stringValue) return '';
-  
-  // 数値の場合のみ０埋め処理を行う
-  if (/^\d+$/.test(stringValue)) {
-    return stringValue.padStart(length, '0');
-  }
-  
-  return stringValue;
-}
 
-/**
- * プルダウン選択値の抽出（「1:普通」→「1」）
- * @param {any} value - 元の値
- * @return {string} 抽出された値
- */
-function extractSelectValue(value) {
-  const stringValue = String(value || '').trim();
-  if (!stringValue) return '';
-  
-  // 「1:普通」形式の場合、「:」の前の値を抽出
-  if (stringValue.includes(':')) {
-    return stringValue.split(':')[0];
-  }
-  
-  return stringValue;
-}
+
+
 
 /**
  * 全銀協フォーマットファイルのダウンロード

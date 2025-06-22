@@ -255,126 +255,246 @@ function getBankMasterData() {
 }
 
 /**
- * 手動一括補完機能
+ * 手動一括補完機能（メイン処理）
  * @return {Object} 補完結果レポート
  */
 function bulkAutoComplete() {
   const startTime = Date.now();
-  let bankNameCompletions = 0;
-  let branchNameCompletions = 0;
-  let failures = 0;
   
   try {
     logInfo('一括補完開始');
     
+    // 1. 初期化とデータ準備
+    const initResult = initializeBulkAutoComplete();
+    if (!initResult.success) {
+      return initResult.result;
+    }
+    
+    const { sheet, masterData, values, dataRange } = initResult.data;
+    
+    // 2. 一括補完処理実行
+    const completionResult = executeBulkCompletion(values, masterData);
+    
+    // 3. 結果をスプレッドシートに反映
+    const updateResult = updateSheetWithCompletions(dataRange, values, completionResult.hasUpdates);
+    
+    // 4. 結果レポート生成
+    const processingTime = Date.now() - startTime;
+    const report = generateCompletionReport(values.length, completionResult, processingTime);
+    
+    logInfo(`一括補完完了: 銀行名${report.bankNameCompletions}件, 支店名${report.branchNameCompletions}件, 失敗${report.failures}件, 処理時間${processingTime}ms`);
+    
+    return report;
+    
+  } catch (error) {
+    logError('一括補完エラー: ' + error.toString());
+    throw error;
+  }
+}
+
+/**
+ * 一括補完の初期化処理
+ * @return {Object} 初期化結果
+ */
+function initializeBulkAutoComplete() {
+  try {
     // キャッシュをクリアして最新データを取得
     const cache = CacheService.getScriptCache();
     cache.remove(CACHE_CONFIG.BANK_MASTER_KEY);
     logDebug('キャッシュクリア完了');
     
+    // シート取得
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRANSFER_DATA);
     if (!sheet) {
       throw new Error('振込データシートが見つかりません');
     }
     logDebug(`振込データシート名: ${sheet.getName()}`);
     
+    // データ範囲チェック
     const lastRow = sheet.getLastRow();
     logDebug(`最終行: ${lastRow}`);
     if (lastRow <= 1) {
       return {
-        totalRows: 0,
-        bankNameCompletions: 0,
-        branchNameCompletions: 0,
-        failures: 0,
-        processingTime: Date.now() - startTime
+        success: true,
+        result: {
+          totalRows: 0,
+          bankNameCompletions: 0,
+          branchNameCompletions: 0,
+          failures: 0,
+          processingTime: 0
+        }
       };
     }
     
-    // マスタデータを事前に取得
+    // マスタデータ取得
     const masterData = getBankMasterData();
     logInfo(`マスタデータ件数: ${masterData.length}`);
     if (masterData.length === 0) {
       throw new Error('金融機関マスタデータが存在しません');
     }
     
-    // 一括処理用のデータ準備
+    // データ範囲取得
     const dataRange = sheet.getRange(2, 1, lastRow - 1, Object.keys(TRANSFER_DATA_COLUMNS).length);
     const values = dataRange.getValues();
-    let hasUpdates = false;
-    
-    for (let i = 0; i < values.length; i++) {
-      const row = values[i];
-      const rowNum = i + 2;
-      
-      // 空行スキップ
-      if (isEmptyRow(row)) {
-        logDebug(`行${rowNum}: 空行のためスキップ`);
-        continue;
-      }
-      
-      const rawBankCode = row[TRANSFER_DATA_COLUMNS.BANK_CODE - 1];
-      const rawBranchCode = row[TRANSFER_DATA_COLUMNS.BRANCH_CODE - 1];
-      const currentBankName = String(row[TRANSFER_DATA_COLUMNS.BANK_NAME - 1] || '').trim();
-      const currentBranchName = String(row[TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] || '').trim();
-      
-      // 数値を適切な桁数に0埋めして文字列に変換
-      const bankCode = normalizeCode(rawBankCode, VALIDATION_RULES.BANK_CODE_LENGTH);
-      const branchCode = normalizeCode(rawBranchCode, VALIDATION_RULES.BRANCH_CODE_LENGTH);
-      
-      logDebug(`行${rowNum}: 銀行=${bankCode}, 支店=${branchCode}`);
-      
-      // 銀行コードがある場合の銀行名補完
-      if (bankCode && bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && !currentBankName) {
-        const bankName = findBankNameFromCache(masterData, bankCode);
-        if (bankName) {
-          logDebug(`行${rowNum}: 銀行名補完成功 - ${bankCode} -> ${bankName}`);
-          values[i][TRANSFER_DATA_COLUMNS.BANK_NAME - 1] = bankName;
-          bankNameCompletions++;
-          hasUpdates = true;
-        } else {
-          logDebug(`行${rowNum}: 銀行名補完失敗 - 銀行コード ${bankCode} が見つかりません`);
-          failures++;
-        }
-      }
-      
-      // 支店コードがある場合の支店名補完
-      if (bankCode && branchCode && 
-          bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && 
-          branchCode.length === VALIDATION_RULES.BRANCH_CODE_LENGTH && 
-          !currentBranchName) {
-        const branchName = findBranchNameFromCache(masterData, bankCode, branchCode);
-        if (branchName) {
-          logDebug(`行${rowNum}: 支店名補完成功 - ${bankCode}-${branchCode} -> ${branchName}`);
-          values[i][TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] = branchName;
-          branchNameCompletions++;
-          hasUpdates = true;
-        } else {
-          logDebug(`行${rowNum}: 支店名補完失敗 - ${bankCode}-${branchCode} が見つかりません`);
-          failures++;
-        }
-      }
-    }
-    
-    // 一括更新実行（バッチ処理）
-    if (hasUpdates) {
-      dataRange.setValues(values);
-      logInfo('一括更新完了（バッチ処理）');
-    }
-    
-    const processingTime = Date.now() - startTime;
-    logInfo(`一括補完完了: 銀行名${bankNameCompletions}件, 支店名${branchNameCompletions}件, 失敗${failures}件, 処理時間${processingTime}ms`);
     
     return {
-      totalRows: lastRow - 1,
-      bankNameCompletions,
-      branchNameCompletions,
-      failures,
-      processingTime
+      success: true,
+      data: { sheet, masterData, values, dataRange }
     };
+    
   } catch (error) {
-    logError('一括補完エラー: ' + error.toString());
-    throw error;
+    return {
+      success: false,
+      result: {
+        totalRows: 0,
+        bankNameCompletions: 0,
+        branchNameCompletions: 0,
+        failures: 0,
+        processingTime: Date.now() - startTime,
+        error: error.message
+      }
+    };
   }
+}
+
+/**
+ * 一括補完処理の実行
+ * @param {Array[]} values - スプレッドシートのデータ
+ * @param {Array[]} masterData - 金融機関マスタデータ
+ * @return {Object} 補完結果
+ */
+function executeBulkCompletion(values, masterData) {
+  let bankNameCompletions = 0;
+  let branchNameCompletions = 0;
+  let failures = 0;
+  let hasUpdates = false;
+  
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const rowNum = i + 2;
+    
+    // 空行スキップ
+    if (isEmptyRow(row)) {
+      logDebug(`行${rowNum}: 空行のためスキップ`);
+      continue;
+    }
+    
+    // 行ごとの補完処理
+    const rowResult = processRowCompletion(row, rowNum, masterData, i, values);
+    
+    bankNameCompletions += rowResult.bankNameCompletion ? 1 : 0;
+    branchNameCompletions += rowResult.branchNameCompletion ? 1 : 0;
+    failures += rowResult.failures;
+    
+    if (rowResult.hasUpdate) {
+      hasUpdates = true;
+    }
+  }
+  
+  return {
+    bankNameCompletions,
+    branchNameCompletions,
+    failures,
+    hasUpdates
+  };
+}
+
+/**
+ * 行ごとの補完処理
+ * @param {Array} row - 行データ
+ * @param {number} rowNum - 行番号
+ * @param {Array[]} masterData - 金融機関マスタデータ
+ * @param {number} index - 配列インデックス
+ * @param {Array[]} values - 全データ配列（更新用）
+ * @return {Object} 行の補完結果
+ */
+function processRowCompletion(row, rowNum, masterData, index, values) {
+  const rawBankCode = row[TRANSFER_DATA_COLUMNS.BANK_CODE - 1];
+  const rawBranchCode = row[TRANSFER_DATA_COLUMNS.BRANCH_CODE - 1];
+  const currentBankName = String(row[TRANSFER_DATA_COLUMNS.BANK_NAME - 1] || '').trim();
+  const currentBranchName = String(row[TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] || '').trim();
+  
+  // 数値を適切な桁数に0埋めして文字列に変換
+  const bankCode = normalizeCode(rawBankCode, VALIDATION_RULES.BANK_CODE_LENGTH);
+  const branchCode = normalizeCode(rawBranchCode, VALIDATION_RULES.BRANCH_CODE_LENGTH);
+  
+  logDebug(`行${rowNum}: 銀行=${bankCode}, 支店=${branchCode}`);
+  
+  let bankNameCompletion = false;
+  let branchNameCompletion = false;
+  let failures = 0;
+  let hasUpdate = false;
+  
+  // 銀行名補完
+  if (bankCode && bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && !currentBankName) {
+    const bankName = findBankNameFromCache(masterData, bankCode);
+    if (bankName) {
+      logDebug(`行${rowNum}: 銀行名補完成功 - ${bankCode} -> ${bankName}`);
+      values[index][TRANSFER_DATA_COLUMNS.BANK_NAME - 1] = bankName;
+      bankNameCompletion = true;
+      hasUpdate = true;
+    } else {
+      logDebug(`行${rowNum}: 銀行名補完失敗 - 銀行コード ${bankCode} が見つかりません`);
+      failures++;
+    }
+  }
+  
+  // 支店名補完
+  if (bankCode && branchCode && 
+      bankCode.length === VALIDATION_RULES.BANK_CODE_LENGTH && 
+      branchCode.length === VALIDATION_RULES.BRANCH_CODE_LENGTH && 
+      !currentBranchName) {
+    const branchName = findBranchNameFromCache(masterData, bankCode, branchCode);
+    if (branchName) {
+      logDebug(`行${rowNum}: 支店名補完成功 - ${bankCode}-${branchCode} -> ${branchName}`);
+      values[index][TRANSFER_DATA_COLUMNS.BRANCH_NAME - 1] = branchName;
+      branchNameCompletion = true;
+      hasUpdate = true;
+    } else {
+      logDebug(`行${rowNum}: 支店名補完失敗 - ${bankCode}-${branchCode} が見つかりません`);
+      failures++;
+    }
+  }
+  
+  return {
+    bankNameCompletion,
+    branchNameCompletion,
+    failures,
+    hasUpdate
+  };
+}
+
+/**
+ * スプレッドシートへの更新反映
+ * @param {Range} dataRange - データ範囲
+ * @param {Array[]} values - 更新データ
+ * @param {boolean} hasUpdates - 更新があるかどうか
+ * @return {boolean} 更新成功フラグ
+ */
+function updateSheetWithCompletions(dataRange, values, hasUpdates) {
+  if (hasUpdates) {
+    dataRange.setValues(values);
+    logInfo('一括更新完了（バッチ処理）');
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 補完結果レポートの生成
+ * @param {number} totalRows - 総行数
+ * @param {Object} completionResult - 補完結果
+ * @param {number} processingTime - 処理時間
+ * @return {Object} レポート
+ */
+function generateCompletionReport(totalRows, completionResult, processingTime) {
+  return {
+    totalRows,
+    bankNameCompletions: completionResult.bankNameCompletions,
+    branchNameCompletions: completionResult.branchNameCompletions,
+    failures: completionResult.failures,
+    processingTime
+  };
 }
 
 /**
@@ -591,33 +711,4 @@ function refreshMasterDataCache() {
   }
 }
 
-/**
- * 数値コードを適切な桁数に0埋めして正規化
- * @param {any} value - 元の値（数値または文字列）
- * @param {number} targetLength - 目標桁数
- * @return {string} 0埋めされた文字列
- */
-function normalizeCode(value, targetLength) {
-  if (value === null || value === undefined || value === '') {
-    return '';
-  }
-  
-  // 数値の場合は文字列に変換して0埋め
-  if (typeof value === 'number') {
-    return String(value).padStart(targetLength, '0');
-  }
-  
-  // 文字列の場合はトリムして0埋め
-  const strValue = String(value).trim();
-  if (strValue === '') {
-    return '';
-  }
-  
-  // 数値文字列の場合は0埋め
-  if (/^\d+$/.test(strValue)) {
-    return strValue.padStart(targetLength, '0');
-  }
-  
-  // その他の場合はそのまま返す
-  return strValue;
-} 
+ 

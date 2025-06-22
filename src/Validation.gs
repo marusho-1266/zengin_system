@@ -463,51 +463,6 @@ function validateBankMasterExists(bankCode, branchCode) {
   }
 }
 
-/**
- * 行が空かどうかチェック
- * @param {Array} row - 行データ
- * @return {boolean} 空行かどうか
- */
-function isEmptyRow(row) {
-  return row.every(cell => !cell || String(cell).trim() === '');
-}
 
-/**
- * 半角カナ文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidKana(str) {
-  // 半角カナ文字とスペースのみ許可
-  return /^[ｱ-ﾝ ]+$/.test(str);
-}
 
-/**
- * 全銀協フォーマット対応文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidZenginFormat(str) {
-  // 全銀協フォーマット対応文字: 半角カナ、英数字、記号（カンマ除く）、スペース
-  // 使用可能文字: A-Z, 0-9, ｱ-ﾝ, 濁点, 半濁点, 長音, 中点, 各種記号（カンマ除く）
-  const zenginFormatRegex = /^[A-Z0-9ｱ-ﾝﾞﾟｧ-ｯ ・ー().\-/]+$/;
-  return zenginFormatRegex.test(str);
-}
-
-/**
- * 数値文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidNumber(str) {
-  return /^\d+$/.test(str);
-}
-
-/**
- * 英数字文字列の検証
- * @param {string} str - 検証対象文字列
- * @return {boolean} 有効かどうか
- */
-function isValidAlphanumeric(str) {
-  return /^[A-Za-z0-9]+$/.test(str);
-} 
+ 
