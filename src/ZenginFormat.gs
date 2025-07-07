@@ -108,7 +108,7 @@ function getClientInfo() {
     }
     
     const data = {
-      clientCode: String(sheet.getRange(CLIENT_INFO_CELLS.CLIENT_CODE).getValue() || '').trim(),
+      clientCode: normalizeNumericCode(sheet.getRange(CLIENT_INFO_CELLS.CLIENT_CODE).getValue(), 10),
       clientName: String(sheet.getRange(CLIENT_INFO_CELLS.CLIENT_NAME).getValue() || '').trim(),
       bankCode: normalizeNumericCode(sheet.getRange(CLIENT_INFO_CELLS.BANK_CODE).getValue(), 4),
       bankName: String(sheet.getRange(CLIENT_INFO_CELLS.BANK_NAME).getValue() || '').trim(),

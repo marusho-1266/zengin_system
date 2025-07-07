@@ -22,9 +22,9 @@ function validateClientInfo() {
       { 
         cell: CLIENT_INFO_CELLS.CLIENT_CODE, 
         label: CLIENT_INFO_LABELS.CLIENT_CODE, 
-        maxLength: VALIDATION_RULES.CLIENT_CODE_MAX_LENGTH,
+        exactLength: VALIDATION_RULES.CLIENT_CODE_MAX_LENGTH,
         required: true,
-        type: 'alphanumeric'
+        type: 'number'
       },
       { 
         cell: CLIENT_INFO_CELLS.CLIENT_NAME, 

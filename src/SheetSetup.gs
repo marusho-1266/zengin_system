@@ -117,6 +117,11 @@ function setupClientInfoValidation(sheet) {
     .setAllowInvalid(false)
     .build();
   
+  // 委託者コード: 10桁の数値書式
+  const clientCodeCell = sheet.getRange(CLIENT_INFO_CELLS.CLIENT_CODE);
+  clientCodeCell.setDataValidation(numberRule);
+  clientCodeCell.setNumberFormat('0000000000');
+  
   // 銀行コード: 4桁の数値書式
   const bankCodeCell = sheet.getRange(CLIENT_INFO_CELLS.BANK_CODE);
   bankCodeCell.setDataValidation(numberRule);
